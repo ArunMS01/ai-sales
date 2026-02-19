@@ -236,7 +236,7 @@ class SEOScorer:
             + "&strategy=mobile&key=" + PAGESPEED_API_KEY
         )
         try:
-            resp = requests.get(url, timeout=15).json()
+            resp = requests.get(url, timeout=30).json()
             cats = resp.get("lighthouseResult", {}).get("categories", {})
             lead.pagespeed_score = int(cats.get("performance", {}).get("score", 1) * 100)
             lead.seo_score       = int(cats.get("seo", {}).get("score", 1) * 100)
@@ -330,7 +330,7 @@ class LeadSourcingPipeline:
         for i, lead in enumerate(all_leads):
             if lead.website:
                 all_leads[i] = self.seo.score_lead(lead)
-            time.sleep(0.1)
+            time.sleep(0.3)
 
         all_leads = self.seo.prioritize(all_leads)
 
