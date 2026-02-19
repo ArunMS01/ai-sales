@@ -130,6 +130,7 @@ async def dashboard():
       <div class="actions-row">
         <button class="btn btn-primary" onclick="runPipeline()">▶ Source Leads</button>
         <button class="btn btn-green" onclick="seedLeads()">🌱 Load Seed Leads</button>
+        <button class="btn" style="background:#e1306c;color:white" onclick="runInstagram()">📸 Scrape Instagram</button>
         <button class="btn btn-ghost" onclick="refreshAll()">↻ Refresh</button>
       </div>
       <div class="progress-wrap">
@@ -347,6 +348,22 @@ document.getElementById('chatInput').addEventListener('keydown', e => {
 });
 
 // ── Pipeline Actions ──────────────────────────────────────────────────────────
+async function runInstagram() {
+  addLog('Starting Instagram D2C scraper...', 'info');
+  addLog('Searching hashtags: #madeinindia #d2cindia #indianbrand...', 'info');
+  updateProgress(5, 'Scraping Instagram hashtags...');
+  document.getElementById('pipelineStatus').textContent = 'Running';
+  try {
+    const r = await fetch('/leads/instagram');
+    const d = await r.json();
+    addLog('Instagram scraper started — takes 5-10 mins (respectful rate limiting)', 'info');
+    addLog('Watch logs for @username updates as brands are found...', 'info');
+    pollLogs();
+  } catch(e) {
+    addLog('Error: ' + e.message, 'error');
+  }
+}
+
 async function seedLeads() {
   addLog('Loading seed leads...', 'info');
   updateProgress(10, 'Loading seed founders list...');
@@ -453,6 +470,22 @@ async def stats():
 @app.get("/api/logs")
 async def get_logs(from_: int = 0):
     return {"logs": log_buffer[from_:], "total": len(log_buffer)}
+
+
+# ── Instagram Scrape ─────────────────────────────────────────────────────────
+@app.get("/leads/instagram")
+async def run_instagram(background_tasks: BackgroundTasks):
+    def _run():
+        try:
+            from instagram_scraper import InstagramLeadPipeline
+            log("[Instagram] Starting D2C brand scraper...")
+            pipeline = InstagramLeadPipeline()
+            leads = pipeline.run(max_leads=100)
+            log("[Instagram] Done! Found " + str(len(leads)) + " brand leads")
+        except Exception as e:
+            log("[Instagram] Error: " + str(e))
+    background_tasks.add_task(_run)
+    return {"status": "started", "message": "Instagram scraper running in background"}
 
 
 # ── Leads Seed ────────────────────────────────────────────────────────────────
