@@ -63,7 +63,6 @@ class ApolloSource:
                 break
             try:
                 payload = {
-                    "api_key":          APOLLO_API_KEY,
                     "q_keywords":       s["keywords"],
                     "person_titles":    s["titles"],
                     "person_locations": ["India"],
@@ -72,6 +71,7 @@ class ApolloSource:
                 }
                 resp = requests.post(
                     self.BASE_URL + "/mixed_people/search",
+                    headers={"Content-Type": "application/json", "x-api-key": APOLLO_API_KEY},
                     json=payload,
                     timeout=20
                 )
