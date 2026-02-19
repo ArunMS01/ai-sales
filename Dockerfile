@@ -24,4 +24,5 @@ COPY . .
 EXPOSE 8000
 
 # Start the main server (handles webhooks + orchestrator)
-CMD uvicorn main:app --host 0.0.0.0 --port $PORT
+# Port is handled by railway.toml startCommand
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
