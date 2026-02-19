@@ -1,16 +1,3 @@
-"""
-main.py — Railway Entry Point
-==============================
-Single FastAPI app that runs everything:
-  - /health         → Railway health check
-  - /vapi/webhook   → Handles Vapi call events
-  - /twilio/webhook → Handles incoming WhatsApp replies
-  - /leads/run      → Manually trigger lead sourcing
-  - /leads/list     → View current leads
-  - /agent/chat     → Test the AI brain via API
-  - Background scheduler for follow-ups + outreach
-"""
-
 import os
 import json
 import time
@@ -20,59 +7,28 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, BackgroundTasks
 from fastapi.responses import JSONResponse, HTMLResponse
-from twilio.twiml.messaging_response import MessagingResponse
 
 load_dotenv()
 
-# ── Background scheduler thread ───────────────────────────────────────────────
-scheduler_thread = None
-
-def start_scheduler():
-    """Run orchestrator scheduler in a background thread."""
-    try:
-        from module5_orchestrator import SalesAgentOrchestrator
-        orch = SalesAgentOrchestrator()
-        orch.start()
-    except Exception as e:
-        print(f"[Scheduler] Error: {e}")
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Start background scheduler AFTER app is ready."""
-    global scheduler_thread
-    print("🚀 AI Sales Agent starting on Railway...")
-
-    def delayed_start():
-        time.sleep(15)  # wait for health check to pass first
-        start_scheduler()
-
-    scheduler_thread = threading.Thread(target=delayed_start, daemon=True)
-    scheduler_thread.start()
-    print("✅ App ready. Scheduler starting in 15s...")
+    print("✅ App ready.")
     yield
-    print("Shutting down...")
 
-# ── FastAPI App ────────────────────────────────────────────────────────────────
-app = FastAPI(
-    title="AI Sales Agent",
-    description="Automated sales agent for digital marketing agency",
-    lifespan=lifespan
-)
+app = FastAPI(title="AI Sales Agent", lifespan=lifespan)
 
-
-# ── Health Check (required by Railway) ───────────────────────────────────────
+# ── Health Check ──────────────────────────────────────────────────────────────
 @app.get("/health")
 async def health():
     return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
 
-
-# ── Dashboard (simple status page) ───────────────────────────────────────────
+# ── Dashboard ─────────────────────────────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)
 async def dashboard():
     try:
         with open("leads.json") as f:
             leads = json.load(f)
-    except FileNotFoundError:
+    except:
         leads = []
 
     stage_counts = {}
@@ -87,99 +43,103 @@ async def dashboard():
     ])
 
     return f"""
-    <html>
-    <head>
-      <title>AI Sales Agent</title>
-      <style>
-        body {{ font-family: Arial, sans-serif; background: #0f1117; color: #e2e8f0; padding: 30px; }}
-        h1 {{ color: #a78bfa; }} h2 {{ color: #6366f1; margin-top: 30px; }}
-        .stat {{ display: inline-block; background: #1e2130; border-radius: 10px; padding: 16px 28px; margin: 8px; text-align: center; }}
-        .stat .num {{ font-size: 2rem; font-weight: bold; color: #a78bfa; }}
-        .stat .label {{ font-size: 0.8rem; color: #64748b; }}
-        table {{ width: 100%; border-collapse: collapse; margin-top: 16px; }}
-        th {{ background: #1e2130; padding: 10px; text-align: left; color: #6366f1; }}
-        td {{ padding: 8px 10px; border-bottom: 1px solid #1e2130; font-size: 0.85rem; }}
-      </style>
-    </head>
+    <html><head><title>AI Sales Agent</title>
+    <style>
+      body {{ font-family: Arial, sans-serif; background: #0f1117; color: #e2e8f0; padding: 30px; }}
+      h1 {{ color: #a78bfa; }} h2 {{ color: #6366f1; margin-top: 30px; }}
+      .stat {{ display: inline-block; background: #1e2130; border-radius: 10px; padding: 16px 28px; margin: 8px; text-align: center; }}
+      .stat .num {{ font-size: 2rem; font-weight: bold; color: #a78bfa; }}
+      .stat .label {{ font-size: 0.8rem; color: #64748b; }}
+      table {{ width: 100%; border-collapse: collapse; margin-top: 16px; }}
+      th {{ background: #1e2130; padding: 10px; text-align: left; color: #6366f1; }}
+      td {{ padding: 8px 10px; border-bottom: 1px solid #1e2130; font-size: 0.85rem; }}
+      a.btn {{ background:#6366f1; color:white; padding:10px 20px; border-radius:8px; text-decoration:none; margin-right:10px; }}
+    </style></head>
     <body>
-      <h1>🤖 AI Sales Agent — Live Dashboard</h1>
-      <p style="color:#64748b">Running on Railway · {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</p>
-
+      <h1>🤖 AI Sales Agent — Live</h1>
+      <p style="color:#64748b">{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</p>
       <div>
         <div class="stat"><div class="num">{len(leads)}</div><div class="label">Total Leads</div></div>
-        <div class="stat"><div class="num">{stage_counts.get('new', 0)}</div><div class="label">New</div></div>
-        <div class="stat"><div class="num">{stage_counts.get('contacted', 0)}</div><div class="label">Contacted</div></div>
-        <div class="stat"><div class="num">{stage_counts.get('pitched', 0)}</div><div class="label">Pitched</div></div>
-        <div class="stat"><div class="num">{stage_counts.get('closed', 0)}</div><div class="label">Closed 🎉</div></div>
+        <div class="stat"><div class="num">{stage_counts.get('new',0)}</div><div class="label">New</div></div>
+        <div class="stat"><div class="num">{stage_counts.get('contacted',0)}</div><div class="label">Contacted</div></div>
+        <div class="stat"><div class="num">{stage_counts.get('pitched',0)}</div><div class="label">Pitched</div></div>
+        <div class="stat"><div class="num">{stage_counts.get('closed',0)}</div><div class="label">Closed 🎉</div></div>
       </div>
-
       <h2>Recent Leads</h2>
       <table>
         <tr><th>Name</th><th>Website</th><th>Stage</th><th>Phone</th></tr>
-        {rows if rows else '<tr><td colspan="4" style="color:#64748b">No leads yet — hit /leads/run to source leads</td></tr>'}
+        {rows if rows else '<tr><td colspan="4" style="color:#64748b">No leads yet — hit /leads/run</td></tr>'}
       </table>
-
-      <h2>Quick Actions</h2>
-      <p>
-        <a href="/leads/run" style="background:#6366f1;color:white;padding:10px 20px;border-radius:8px;text-decoration:none;margin-right:10px">▶ Source New Leads</a>
-        <a href="/leads/list" style="background:#1e2130;color:#a78bfa;padding:10px 20px;border-radius:8px;text-decoration:none;border:1px solid #3730a3">📋 View All Leads (JSON)</a>
-      </p>
-    </body>
-    </html>
+      <h2>Actions</h2>
+      <a class="btn" href="/leads/run">▶ Source Leads</a>
+      <a class="btn" href="/test-keys" style="background:#1e2130;border:1px solid #6366f1">🔑 Test Keys</a>
+      <a class="btn" href="/docs" style="background:#1e2130;border:1px solid #6366f1">📖 API Docs</a>
+    </body></html>
     """
 
+# ── Test Keys ─────────────────────────────────────────────────────────────────
+@app.get("/test-keys")
+async def test_keys():
+    import requests as req
+    results = {}
 
-# ── Vapi Webhook ──────────────────────────────────────────────────────────────
-@app.post("/vapi/webhook")
-async def vapi_webhook(request: Request):
-    body = await request.json()
-    event_type = body.get("message", {}).get("type", "")
-    call_id    = body.get("message", {}).get("call", {}).get("id", "")
-    print(f"[Vapi] Event: {event_type} | Call: {call_id}")
+    try:
+        import openai
+        openai.OpenAI(api_key=os.environ.get("OPENAI_API_KEY")).models.list()
+        results["openai"] = "✅ Connected"
+    except Exception as e:
+        results["openai"] = f"❌ {str(e)[:80]}"
 
-    if event_type == "call-ended":
-        from module5_orchestrator import SalesAgentOrchestrator
-        orch = SalesAgentOrchestrator()
-        await orch.post_call_processing(call_id, body.get("message", {}))
+    try:
+        key = os.environ.get("GOOGLE_PLACES_API_KEY", "")
+        r = req.get(f"https://maps.googleapis.com/maps/api/place/textsearch/json?query=test&key={key}", timeout=5)
+        results["google_places"] = "✅ Connected" if r.status_code == 200 else f"❌ {r.status_code}: {r.text[:60]}"
+    except Exception as e:
+        results["google_places"] = f"❌ {str(e)[:80]}"
 
-    elif event_type == "function-call":
-        from module3_voice_agent import handle_function_call
-        fn   = body["message"].get("functionCall", {}).get("name", "")
-        args = body["message"].get("functionCall", {}).get("parameters", {})
-        result = await handle_function_call(fn, args, call_id)
-        return JSONResponse({"result": result})
+    try:
+        key = os.environ.get("SENDGRID_API_KEY", "")
+        r = req.get("https://api.sendgrid.com/v3/user/profile", headers={"Authorization": f"Bearer {key}"}, timeout=5)
+        results["sendgrid"] = "✅ Connected" if r.status_code == 200 else f"❌ {r.status_code}"
+    except Exception as e:
+        results["sendgrid"] = f"❌ {str(e)[:80]}"
 
-    return JSONResponse({"status": "ok"})
+    try:
+        sid = os.environ.get("TWILIO_ACCOUNT_SID", "")
+        token = os.environ.get("TWILIO_AUTH_TOKEN", "")
+        r = req.get(f"https://api.twilio.com/2010-04-01/Accounts/{sid}.json", auth=(sid, token), timeout=5)
+        results["twilio"] = "✅ Connected" if r.status_code == 200 else f"❌ {r.status_code}"
+    except Exception as e:
+        results["twilio"] = f"❌ {str(e)[:80]}"
 
+    try:
+        key = os.environ.get("VAPI_API_KEY", "")
+        r = req.get("https://api.vapi.ai/phone-number", headers={"Authorization": f"Bearer {key}"}, timeout=5)
+        results["vapi"] = "✅ Connected" if r.status_code == 200 else f"❌ {r.status_code}"
+    except Exception as e:
+        results["vapi"] = f"❌ {str(e)[:80]}"
 
-# ── Twilio Webhook ────────────────────────────────────────────────────────────
-@app.post("/twilio/webhook")
-async def twilio_webhook(request: Request):
-    form = await request.form()
-    from_number = form.get("From", "").replace("whatsapp:", "")
-    body        = form.get("Body", "")
+    try:
+        key = os.environ.get("HUBSPOT_API_KEY", "")
+        r = req.get("https://api.hubapi.com/crm/v3/objects/contacts", headers={"Authorization": f"Bearer {key}"}, timeout=5)
+        results["hubspot"] = "✅ Connected" if r.status_code == 200 else f"❌ {r.status_code}"
+    except Exception as e:
+        results["hubspot"] = f"❌ {str(e)[:80]}"
 
-    print(f"[WhatsApp] From: {from_number} | Message: {body[:80]}")
+    all_ok = all("✅" in v for v in results.values())
+    return {"all_systems_go": all_ok, "results": results}
 
-    from module4_outreach import WhatsAppManager
-    wa = WhatsAppManager()
-    ai_reply = wa.handle_inbound_whatsapp(from_number, body)
-
-    resp = MessagingResponse()
-    resp.message(ai_reply)
-    return HTMLResponse(content=str(resp), media_type="application/xml")
-
-
-# ── Manual Triggers ───────────────────────────────────────────────────────────
+# ── Leads ─────────────────────────────────────────────────────────────────────
 @app.get("/leads/run")
-async def run_lead_sourcing(background_tasks: BackgroundTasks):
+async def run_leads(background_tasks: BackgroundTasks):
     def _run():
-        from module1_lead_sourcing import LeadSourcingPipeline
-        pipeline = LeadSourcingPipeline()
-        pipeline.run(cities=["Mumbai", "Delhi", "Bangalore"], max_leads=100)
+        try:
+            from module1_lead_sourcing import LeadSourcingPipeline
+            LeadSourcingPipeline().run(cities=["Mumbai", "Delhi", "Bangalore"], max_leads=100)
+        except Exception as e:
+            print(f"[Leads] Error: {e}")
     background_tasks.add_task(_run)
-    return {"status": "started", "message": "Lead sourcing running in background. Check /leads/list in ~5 minutes."}
-
+    return {"status": "started", "message": "Running in background. Check /leads/list in 5 mins."}
 
 @app.get("/leads/list")
 async def list_leads(stage: str = None, limit: int = 50):
@@ -190,36 +150,54 @@ async def list_leads(stage: str = None, limit: int = 50):
             leads = [l for l in leads if l.get("stage") == stage]
         return {"total": len(leads), "leads": leads[:limit]}
     except FileNotFoundError:
-        return {"total": 0, "leads": [], "message": "No leads yet. Hit /leads/run first."}
+        return {"total": 0, "leads": [], "message": "No leads yet."}
 
-
+# ── Agent Chat ────────────────────────────────────────────────────────────────
 @app.post("/agent/chat")
-async def test_agent(request: Request):
+async def agent_chat(request: Request):
     body    = await request.json()
     lead    = body.get("lead", {"name": "Test", "website": "test.com", "pain_points": [], "stage": "new"})
     message = body.get("message", "Hello")
     channel = body.get("channel", "whatsapp")
+    try:
+        from module2_agent_brain import SalesAgentBrain
+        result = SalesAgentBrain().chat(lead, message, channel=channel)
+        return result
+    except Exception as e:
+        return {"error": str(e)}
 
-    from module2_agent_brain import SalesAgentBrain
-    agent = SalesAgentBrain()
-    result = agent.chat(lead, message, channel=channel)
-    return result
+# ── Vapi Webhook ──────────────────────────────────────────────────────────────
+@app.post("/vapi/webhook")
+async def vapi_webhook(request: Request):
+    try:
+        body = await request.json()
+        event_type = body.get("message", {}).get("type", "")
+        call_id    = body.get("message", {}).get("call", {}).get("id", "")
+        print(f"[Vapi] {event_type} | {call_id}")
+        if event_type == "function-call":
+            from module3_voice_agent import handle_function_call
+            fn   = body["message"].get("functionCall", {}).get("name", "")
+            args = body["message"].get("functionCall", {}).get("parameters", {})
+            result = await handle_function_call(fn, args, call_id)
+            return JSONResponse({"result": result})
+    except Exception as e:
+        print(f"[Vapi] Error: {e}")
+    return JSONResponse({"status": "ok"})
 
-
-@app.post("/deals/close")
-async def close_deal(request: Request):
-    body    = await request.json()
-    email   = body.get("lead_email")
-    package = body.get("package", "growth")
-
-    from module5_orchestrator import LeadStateManager, DealCloser
-    state = LeadStateManager()
-    leads = state.load_all()
-    lead  = next((l for l in leads if l.get("email") == email), None)
-
-    if not lead:
-        return JSONResponse({"error": "Lead not found"}, status_code=404)
-
-    closer = DealCloser()
-    result = closer.close_deal(lead, package)
-    return result
+# ── Twilio Webhook ────────────────────────────────────────────────────────────
+@app.post("/twilio/webhook")
+async def twilio_webhook(request: Request):
+    try:
+        form        = await request.form()
+        from_number = form.get("From", "").replace("whatsapp:", "")
+        body        = form.get("Body", "")
+        print(f"[WhatsApp] From: {from_number} | {body[:80]}")
+        from module4_outreach import WhatsAppManager
+        ai_reply = WhatsAppManager().handle_inbound_whatsapp(from_number, body)
+        from twilio.twiml.messaging_response import MessagingResponse
+        resp = MessagingResponse()
+        resp.message(ai_reply)
+        return HTMLResponse(content=str(resp), media_type="application/xml")
+    except Exception as e:
+        print(f"[Twilio] Error: {e}")
+        return HTMLResponse(content="<Response/>", media_type="application/xml")
