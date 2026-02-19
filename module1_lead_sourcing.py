@@ -54,42 +54,57 @@ class GoogleMapsLeadScraper:
     def __init__(self):
         self.api_key = GOOGLE_PLACES_API_KEY
 
-    def search_leads(self, query: str, location: str, max_results: int = 50) -> list[Lead]:
-        """
-        Example:
-            scraper.search_leads("online clothing store", "Mumbai", max_results=50)
-        """
+    # Real queries that return actual e-commerce businesses on Google Maps
+    ECOMMERCE_QUERIES = [
+        "online shopping store",
+        "clothing boutique",
+        "electronics shop",
+        "fashion store",
+        "jewellery shop",
+        "home decor store",
+        "shoe store",
+    ]
+
+    def search_leads(self, query: str, location: str, max_results: int = 20) -> list[Lead]:
         leads = []
-        params = {
-            "query": f"{query} in {location}",
-            "key": self.api_key,
-            "type": "store"
-        }
         url = f"{self.BASE_URL}/textsearch/json"
-        
-        while len(leads) < max_results:
-            resp = requests.get(url, params=params).json()
-            
-            for place in resp.get("results", []):
-                details = self._get_place_details(place["place_id"])
-                lead = Lead(
-                    name=place.get("name", ""),
-                    website=details.get("website", ""),
-                    phone=details.get("formatted_phone_number", ""),
-                    email="",           # enriched via Apollo in step 2
-                    city=location,
-                    source="google_maps"
-                )
-                leads.append(lead)
-                if len(leads) >= max_results:
-                    break
-            
-            next_page = resp.get("next_page_token")
-            if not next_page:
+
+        for q in self.ECOMMERCE_QUERIES:
+            if len(leads) >= max_results:
                 break
-            params = {"pagetoken": next_page, "key": self.api_key}
-            time.sleep(2)  # Google requires delay before next_page_token works
-        
+            params = {
+                "query": f"{q} in {location}",
+                "key": self.api_key,
+            }
+            try:
+                resp = requests.get(url, params=params, timeout=10).json()
+                status = resp.get("status")
+                if status not in ("OK", "ZERO_RESULTS"):
+                    print(f"  [Google Maps] API error: {status} — {resp.get('error_message', '')}")
+                    continue
+
+                for place in resp.get("results", []):
+                    details = self._get_place_details(place["place_id"])
+                    website = details.get("website", "")
+                    phone   = details.get("formatted_phone_number", "")
+                    # Only include businesses with a website (they are real e-commerce leads)
+                    if not website:
+                        continue
+                    lead = Lead(
+                        name=place.get("name", ""),
+                        website=website,
+                        phone=phone,
+                        email="",
+                        city=location,
+                        source="google_maps"
+                    )
+                    leads.append(lead)
+                    if len(leads) >= max_results:
+                        break
+            except Exception as e:
+                print(f"  [Google Maps] Error for query "{q}": {e}")
+            time.sleep(0.5)
+
         print(f"[Google Maps] Found {len(leads)} leads in {location}")
         return leads
 
@@ -136,27 +151,48 @@ class ApolloEnricher:
     def search_ecommerce_companies(self, industry: str = "ecommerce", country: str = "India", max: int = 100) -> list[Lead]:
         """Search Apollo directly for e-commerce companies."""
         payload = {
-            "q_organization_keyword_tags": [industry, "online store", "shopify"],
-            "organization_locations": [country],
-            "person_titles": ["CEO", "Founder", "Owner", "Marketing Head"],
-            "per_page": min(max, 100)
+            "q_keywords": "ecommerce online store shopify",
+            "prospected_by_current_team": ["no"],
+            "person_titles": ["CEO", "Founder", "Owner", "Co-Founder", "Marketing Manager"],
+            "organization_industry_tag_ids": [],
+            "person_locations": [country],
+            "per_page": min(max, 25),
+            "page": 1
         }
-        resp = requests.post(f"{self.BASE_URL}/mixed_people/search", headers=self.headers, json=payload).json()
-        leads = []
-        
-        for person in resp.get("people", []):
-            org = person.get("organization", {})
-            leads.append(Lead(
-                name=person.get("name", ""),
-                website=org.get("website_url", ""),
-                phone=person.get("phone", ""),
-                email=person.get("email", ""),
-                city=org.get("city", ""),
-                source="apollo"
-            ))
-        
-        print(f"[Apollo] Found {len(leads)} e-commerce leads")
-        return leads
+        try:
+            resp = requests.post(
+                f"{self.BASE_URL}/mixed_people/search",
+                headers=self.headers,
+                json=payload,
+                timeout=15
+            ).json()
+
+            if "error" in resp:
+                print(f"  [Apollo] API error: {resp['error']}")
+                return []
+
+            leads = []
+            for person in resp.get("people", []):
+                org     = person.get("organization") or {}
+                email   = person.get("email") or ""
+                # Skip leads without email or website
+                website = org.get("website_url") or ""
+                if not website:
+                    continue
+                leads.append(Lead(
+                    name=person.get("name", ""),
+                    website=website,
+                    phone=person.get("phone_numbers", [{}])[0].get("sanitized_number", "") if person.get("phone_numbers") else "",
+                    email=email,
+                    city=org.get("city", country),
+                    source="apollo"
+                ))
+
+            print(f"[Apollo] Found {len(leads)} e-commerce leads")
+            return leads
+        except Exception as e:
+            print(f"  [Apollo] Exception: {e}")
+            return []
 
 
 # ── Source 3: SEO & PageSpeed Scorer (hotter leads = worse scores) ───────────
