@@ -33,3 +33,4 @@ jinja2==3.1.4
 # Explicitly block audio packages that cause build failures on Linux
 # (these are pulled in by some deps but not needed — Vapi is cloud-based)
 --no-binary pyaudio
+psycopg2-binary==2.9.9
