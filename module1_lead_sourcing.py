@@ -334,9 +334,16 @@ class LeadSourcingPipeline:
 
         all_leads = self.seo.prioritize(all_leads)
 
-        with open("leads.json", "w") as f:
-            json.dump([asdict(l) for l in all_leads], f, indent=2)
-        print("Saved " + str(len(all_leads)) + " leads to leads.json")
+        try:
+            from database import init_db, save_leads
+            init_db()
+            save_leads(all_leads)
+        except Exception as e:
+            print("[DB] Error: " + str(e))
+            # Fallback to file
+            with open("leads.json", "w") as f:
+                json.dump([asdict(l) for l in all_leads], f, indent=2)
+        print("Saved " + str(len(all_leads)) + " leads")
 
         print("\n=== STEP 5: HubSpot Sync ===")
         synced = 0
