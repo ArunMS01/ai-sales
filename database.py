@@ -29,7 +29,7 @@ def init_db():
         "seo_score INTEGER,"
         "pagespeed_score INTEGER,"
         "pain_points TEXT DEFAULT '[]',"
-        "stage TEXT DEFAULT 'new',"
+        "followers INTEGER DEFAULT 0,""stage TEXT DEFAULT 'new',"
         "created_at TEXT,"
         "updated_at TEXT"
         ")"
@@ -70,6 +70,7 @@ def save_leads(leads):
                     d.get("seo_score"),
                     d.get("pagespeed_score"),
                     json.dumps(d.get("pain_points") or []),
+                    int(d.get("followers") or 0),
                     str(d.get("stage") or "new"),
                     str(d.get("created_at") or datetime.utcnow().isoformat()),
                     datetime.utcnow().isoformat()
