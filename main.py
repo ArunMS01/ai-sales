@@ -26,15 +26,15 @@ async def health():
 @app.get("/", response_class=HTMLResponse)
 async def dashboard():
     try:
-        with open("leads.json") as f:
-            leads = json.load(f)
+        from database import init_db, load_leads, count_by_stage
+        init_db()
+        leads = load_leads(limit=20)
+        stage_counts = count_by_stage()
     except:
         leads = []
+        stage_counts = {}
 
-    stage_counts = {}
-    for l in leads:
-        s = l.get("stage", "unknown")
-        stage_counts[s] = stage_counts.get(s, 0) + 1
+
 
     rows = "".join([
         f"<tr><td>{l.get('name','')}</td><td>{l.get('website','')}</td>"
@@ -130,27 +130,55 @@ async def test_keys():
     return {"all_systems_go": all_ok, "results": results}
 
 # ── Leads ─────────────────────────────────────────────────────────────────────
-@app.get("/leads/run")
+@app.get("/leads/run", response_class=HTMLResponse)
 async def run_leads(background_tasks: BackgroundTasks):
     def _run():
         try:
             from module1_lead_sourcing import LeadSourcingPipeline
+            print("[Leads] Starting pipeline...")
             LeadSourcingPipeline().run(cities=["Mumbai", "Delhi", "Bangalore"], max_leads=100)
+            print("[Leads] Pipeline complete!")
         except Exception as e:
             print(f"[Leads] Error: {e}")
     background_tasks.add_task(_run)
-    return {"status": "started", "message": "Running in background. Check /leads/list in 5 mins."}
+    return """
+    <html><head><title>Sourcing Leads...</title>
+    <meta http-equiv="refresh" content="60;url=/leads/list">
+    <style>
+      body{font-family:Arial;background:#0f1117;color:#e2e8f0;padding:40px;text-align:center;}
+      .box{background:#1e2130;border-radius:14px;padding:40px;max-width:500px;margin:0 auto;}
+      a{color:#a78bfa;}
+      .spin{display:inline-block;font-size:3rem;animation:s 1s linear infinite;}
+      @keyframes s{to{transform:rotate(360deg)}}
+    </style></head>
+    <body><div class="box">
+      <div class="spin">⚙️</div>
+      <h2 style="color:#a78bfa;margin-top:20px">Sourcing E-Commerce Leads...</h2>
+      <p style="color:#64748b">Scanning Google Maps + Apollo.io + scoring SEO weakness.<br>Takes 3–5 minutes.</p>
+      <p style="color:#64748b;margin-top:20px">
+        Auto-redirecting to results in 60 seconds.<br>
+        Or <a href="/leads/list">click here to check now</a>.
+      </p>
+    </div></body></html>
+    """
 
 @app.get("/leads/list")
 async def list_leads(stage: str = None, limit: int = 50):
     try:
-        with open("leads.json") as f:
-            leads = json.load(f)
-        if stage:
-            leads = [l for l in leads if l.get("stage") == stage]
-        return {"total": len(leads), "leads": leads[:limit]}
-    except FileNotFoundError:
-        return {"total": 0, "leads": [], "message": "No leads yet."}
+        from database import init_db, load_leads
+        init_db()
+        leads = load_leads(stage=stage, limit=limit)
+        return {"total": len(leads), "leads": leads}
+    except Exception as e:
+        # Fallback to file
+        try:
+            with open("leads.json") as f:
+                leads = json.load(f)
+            if stage:
+                leads = [l for l in leads if l.get("stage") == stage]
+            return {"total": len(leads), "leads": leads[:limit]}
+        except:
+            return {"total": 0, "leads": [], "error": str(e)}
 
 # ── Agent Chat ────────────────────────────────────────────────────────────────
 @app.post("/agent/chat")
