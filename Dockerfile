@@ -24,4 +24,4 @@ COPY . .
 EXPOSE 8000
 
 # Start the main server (handles webhooks + orchestrator)
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", $PORT]
+CMD uvicorn main:app --host 0.0.0.0 --port $PORT
