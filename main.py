@@ -190,8 +190,8 @@ async def dashboard():
         <table class="leads-table">
           <thead>
             <tr>
-              <th>Name</th><th>Company</th><th>Website</th>
-              <th>City</th><th>Email</th><th>Stage</th><th>Pain Points</th><th>Action</th>
+              <th>Name</th><th>Company</th><th>Phone / WhatsApp</th>
+              <th>Email</th><th>City</th><th>Website</th><th>Stage</th><th>Pain Points</th><th>Action</th>
             </tr>
           </thead>
           <tbody id="leadsBody">
@@ -490,7 +490,7 @@ async def get_logs(from_: int = 0):
 
 # ── IndiaMART Scrape ─────────────────────────────────────────────────────────
 @app.get("/leads/indiamart")
-async def run_indiamart(background_tasks: BackgroundTasks, max_per_category: int = 25, clear: bool = True):
+async def run_indiamart(background_tasks: BackgroundTasks, max_per_category: int = 25, clear: bool = False):
     def _run():
         try:
             from indiamart_scraper import IndiaMartLeadPipeline
