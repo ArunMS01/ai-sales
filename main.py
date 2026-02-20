@@ -131,6 +131,7 @@ async def dashboard():
         <button class="btn btn-primary" onclick="runPipeline()">▶ Source Leads</button>
         <button class="btn btn-green" onclick="seedLeads()">🌱 Load Seed Leads</button>
         <button class="btn" style="background:#e1306c;color:white" onclick="runInstagram()">🔍 Find D2C Brands</button>
+        <button class="btn" style="background:#f97316;color:white" onclick="runIndiamart()">🏭 Scrape IndiaMART</button>
         <button class="btn btn-ghost" onclick="refreshAll()">↻ Refresh</button>
       </div>
       <div class="progress-wrap">
@@ -348,6 +349,21 @@ document.getElementById('chatInput').addEventListener('keydown', e => {
 });
 
 // ── Pipeline Actions ──────────────────────────────────────────────────────────
+async function runIndiamart() {
+  addLog('Starting IndiaMART scraper...', 'info');
+  addLog('Categories: Clothing, Electronics, Food, Furniture', 'info');
+  updateProgress(5, 'Scraping IndiaMART sellers...');
+  document.getElementById('pipelineStatus').textContent = 'Running';
+  try {
+    const r = await fetch('/leads/indiamart');
+    const d = await r.json();
+    addLog('IndiaMART scraper started — scraping seller profiles...', 'info');
+    pollLogs();
+  } catch(e) {
+    addLog('Error: ' + e.message, 'error');
+  }
+}
+
 async function runInstagram() {
   addLog('Searching Google for Indian D2C brands...', 'info');
   addLog('Queries: Shopify India, WooCommerce India, fashion brands...', 'info');
@@ -470,6 +486,23 @@ async def stats():
 @app.get("/api/logs")
 async def get_logs(from_: int = 0):
     return {"logs": log_buffer[from_:], "total": len(log_buffer)}
+
+
+# ── IndiaMART Scrape ─────────────────────────────────────────────────────────
+@app.get("/leads/indiamart")
+async def run_indiamart(background_tasks: BackgroundTasks, max_per_category: int = 25):
+    def _run():
+        try:
+            from indiamart_scraper import IndiaMartLeadPipeline
+            log("[IndiaMART] Starting scraper for 4 categories...")
+            log("[IndiaMART] Clothing, Electronics, Food, Furniture")
+            pipeline = IndiaMartLeadPipeline()
+            leads = pipeline.run(max_per_category=max_per_category)
+            log("[IndiaMART] Done! Scraped " + str(len(leads)) + " seller leads")
+        except Exception as e:
+            log("[IndiaMART] Error: " + str(e))
+    background_tasks.add_task(_run)
+    return {"status": "started", "message": "IndiaMART scraper running"}
 
 
 # ── Instagram Scrape ─────────────────────────────────────────────────────────
