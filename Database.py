@@ -14,26 +14,27 @@ def get_conn():
 def init_db():
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute(
-        "CREATE TABLE IF NOT EXISTS leads ("
-        "id SERIAL PRIMARY KEY,"
-        "name TEXT,"
-        "website TEXT,"
-        "phone TEXT,"
-        "email TEXT,"
-        "city TEXT,"
-        "source TEXT,"
-        "linkedin_url TEXT DEFAULT '',"
-        "job_title TEXT DEFAULT '',"
-        "company TEXT DEFAULT '',"
-        "seo_score INTEGER,"
-        "pagespeed_score INTEGER,"
-        "pain_points TEXT DEFAULT '[]',"
-        "followers INTEGER DEFAULT 0,""stage TEXT DEFAULT 'new',"
-        "created_at TEXT,"
-        "updated_at TEXT"
-        ")"
-    )
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS leads (
+            id SERIAL PRIMARY KEY,
+            name TEXT DEFAULT '',
+            website TEXT DEFAULT '',
+            phone TEXT DEFAULT '',
+            email TEXT DEFAULT '',
+            city TEXT DEFAULT '',
+            source TEXT DEFAULT '',
+            linkedin_url TEXT DEFAULT '',
+            job_title TEXT DEFAULT '',
+            company TEXT DEFAULT '',
+            seo_score INTEGER,
+            pagespeed_score INTEGER,
+            pain_points TEXT DEFAULT '[]',
+            followers INTEGER DEFAULT 0,
+            stage TEXT DEFAULT 'new',
+            created_at TEXT DEFAULT '',
+            updated_at TEXT DEFAULT ''
+        )
+    """)
     conn.commit()
     cur.close()
     conn.close()
@@ -47,38 +48,37 @@ def save_leads(leads):
     cur = conn.cursor()
     saved = 0
     for lead in leads:
-        if isinstance(lead, dict):
-            d = lead
-        else:
-            d = lead.__dict__
+        d = lead if isinstance(lead, dict) else lead.__dict__
         try:
-            cur.execute(
-                "INSERT INTO leads "
-                "(name,website,phone,email,city,source,linkedin_url,job_title,company,"
-                "seo_score,pagespeed_score,pain_points,stage,created_at,updated_at) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                (
-                    str(d.get("name") or ""),
-                    str(d.get("website") or ""),
-                    str(d.get("phone") or ""),
-                    str(d.get("email") or ""),
-                    str(d.get("city") or ""),
-                    str(d.get("source") or ""),
-                    str(d.get("linkedin_url") or ""),
-                    str(d.get("job_title") or ""),
-                    str(d.get("company") or ""),
-                    d.get("seo_score"),
-                    d.get("pagespeed_score"),
-                    json.dumps(d.get("pain_points") or []),
-                    int(d.get("followers") or 0),
-                    str(d.get("stage") or "new"),
-                    str(d.get("created_at") or datetime.utcnow().isoformat()),
-                    datetime.utcnow().isoformat()
-                )
+            values = (
+                str(d.get("name") or ""),
+                str(d.get("website") or ""),
+                str(d.get("phone") or ""),
+                str(d.get("email") or ""),
+                str(d.get("city") or ""),
+                str(d.get("source") or ""),
+                str(d.get("linkedin_url") or ""),
+                str(d.get("job_title") or ""),
+                str(d.get("company") or ""),
+                d.get("seo_score") or None,
+                d.get("pagespeed_score") or None,
+                json.dumps(d.get("pain_points") or []),
+                int(d.get("followers") or 0),
+                str(d.get("stage") or "new"),
+                str(d.get("created_at") or datetime.utcnow().isoformat()),
+                datetime.utcnow().isoformat(),
             )
+            cur.execute("""
+                INSERT INTO leads
+                (name, website, phone, email, city, source,
+                 linkedin_url, job_title, company,
+                 seo_score, pagespeed_score, pain_points,
+                 followers, stage, created_at, updated_at)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            """, values)
             saved += 1
         except Exception as e:
-            print("[DB] Row error: " + str(e))
+            print("[DB] Row error: " + str(e)[:100])
     conn.commit()
     cur.close()
     conn.close()
