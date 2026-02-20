@@ -389,6 +389,38 @@ async function runIndiamart() {
   }
 }
 
+async function enrichContacts() {
+  addLog('Starting contact enrichment...', 'info');
+  addLog('Searching JustDial + Google for real phones and emails...', 'info');
+  updateProgress(10, 'Enriching contacts...');
+  try {
+    await fetch('/leads/enrich?limit=30');
+    addLog('Enrichment running — check logs for updates', 'success');
+    pollLogs();
+  } catch(e) { addLog('Error: ' + e.message, 'error'); }
+}
+
+async function runOrchestrator() {
+  addLog('Starting full pipeline orchestrator...', 'info');
+  addLog('Steps: Enrich contacts → Send WhatsApp → Track replies', 'info');
+  updateProgress(5, 'Running orchestrator...');
+  document.getElementById('pipelineStatus').textContent = 'Running';
+  try {
+    await fetch('/orchestrator/run?enrich=true&outreach=true');
+    addLog('Orchestrator started — watch logs for progress', 'success');
+    pollLogs();
+  } catch(e) { addLog('Error: ' + e.message, 'error'); }
+}
+
+async function sendFollowups() {
+  addLog('Sending follow-ups to contacted leads...', 'info');
+  try {
+    await fetch('/orchestrator/followups');
+    addLog('Follow-ups queued — check logs', 'success');
+    pollLogs();
+  } catch(e) { addLog('Error: ' + e.message, 'error'); }
+}
+
 async function runInstagram() {
   addLog('Searching Google for Indian D2C brands...', 'info');
   addLog('Queries: Shopify India, WooCommerce India, fashion brands...', 'info');
@@ -513,6 +545,63 @@ async def run_indiamart(background_tasks: BackgroundTasks, max_per_category: int
             log("[IndiaMART] Error: " + str(e))
     background_tasks.add_task(_run)
     return {"status": "started", "message": "IndiaMART scraper running — Chemicals Kanpur"}
+
+
+# ── Contact Enrichment ───────────────────────────────────────────────────────
+@app.get("/leads/enrich")
+async def enrich_contacts(background_tasks: BackgroundTasks, limit: int = 30):
+    def _run():
+        try:
+            from contact_finder import BulkContactEnricher
+            log("[Enrich] Starting contact enrichment for " + str(limit) + " leads...")
+            log("[Enrich] Checking JustDial + Google + website scraping...")
+            e = BulkContactEnricher()
+            updated = e.run(limit=limit)
+            log("[Enrich] Done! Updated " + str(updated) + " leads with real contacts")
+        except Exception as e:
+            log("[Enrich] Error: " + str(e))
+    background_tasks.add_task(_run)
+    return {"status": "started", "message": "Contact enrichment running"}
+
+
+# ── Orchestrator ──────────────────────────────────────────────────────────────
+@app.get("/orchestrator/run")
+async def run_orchestrator(background_tasks: BackgroundTasks, scrape: bool = False, enrich: bool = True, outreach: bool = True):
+    def _run():
+        try:
+            from module5_orchestrator import SalesOrchestrator
+            log("[Orchestrator] Starting full pipeline...")
+            orch    = SalesOrchestrator(log_fn=log)
+            results = orch.run_full_pipeline(scrape_fresh=scrape, enrich=enrich, outreach=outreach)
+            log("[Orchestrator] Complete: " + str(results))
+        except Exception as e:
+            log("[Orchestrator] Error: " + str(e))
+    background_tasks.add_task(_run)
+    return {"status": "started"}
+
+
+@app.get("/orchestrator/summary")
+async def pipeline_summary():
+    try:
+        from module5_orchestrator import SalesOrchestrator
+        orch = SalesOrchestrator(log_fn=log)
+        return orch.get_pipeline_summary()
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/orchestrator/followups")
+async def run_followups(background_tasks: BackgroundTasks):
+    def _run():
+        try:
+            from module5_orchestrator import SalesOrchestrator
+            orch = SalesOrchestrator(log_fn=log)
+            sent = orch.run_followups()
+            log("[Followup] Sent " + str(sent) + " follow-up messages")
+        except Exception as e:
+            log("[Followup] Error: " + str(e))
+    background_tasks.add_task(_run)
+    return {"status": "started"}
 
 
 # ── Instagram Scrape ─────────────────────────────────────────────────────────
