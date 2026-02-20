@@ -47,52 +47,62 @@ def save_leads(leads):
     conn = get_conn()
     cur = conn.cursor()
     saved = 0
+    errors = 0
     for lead in leads:
         d = lead if isinstance(lead, dict) else lead.__dict__
         try:
-            # Sanitize pain_points — remove any % characters that confuse psycopg2
+            # Serialize pain_points safely
             raw_pain = d.get("pain_points") or []
             if isinstance(raw_pain, str):
                 try:
                     raw_pain = json.loads(raw_pain)
                 except Exception:
                     raw_pain = []
-            clean_pain = [str(p).replace("%", "pct") for p in raw_pain]
-            pain_json = json.dumps(clean_pain)
+            pain_json = json.dumps([str(p) for p in raw_pain])
 
-            cur.execute(
+            name        = str(d.get("name") or "")[:200]
+            website     = str(d.get("website") or "")[:500]
+            phone       = str(d.get("phone") or "")[:50]
+            email       = str(d.get("email") or "")[:200]
+            city        = str(d.get("city") or "")[:100]
+            source      = str(d.get("source") or "")[:50]
+            linkedin    = str(d.get("linkedin_url") or "")[:500]
+            job_title   = str(d.get("job_title") or "")[:200]
+            company     = str(d.get("company") or "")[:200]
+            seo_score   = d.get("seo_score") or None
+            page_score  = d.get("pagespeed_score") or None
+            followers   = int(d.get("followers") or 0)
+            stage       = str(d.get("stage") or "new")
+            created_at  = str(d.get("created_at") or datetime.utcnow().isoformat())
+            updated_at  = datetime.utcnow().isoformat()
+
+            sql = (
                 "INSERT INTO leads "
                 "(name, website, phone, email, city, source, "
                 "linkedin_url, job_title, company, "
                 "seo_score, pagespeed_score, pain_points, "
                 "followers, stage, created_at, updated_at) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                (
-                    str(d.get("name") or "")[:200],
-                    str(d.get("website") or "")[:500],
-                    str(d.get("phone") or "")[:50],
-                    str(d.get("email") or "")[:200],
-                    str(d.get("city") or "")[:100],
-                    str(d.get("source") or "")[:50],
-                    str(d.get("linkedin_url") or "")[:500],
-                    str(d.get("job_title") or "")[:200],
-                    str(d.get("company") or "")[:200],
-                    d.get("seo_score") or None,
-                    d.get("pagespeed_score") or None,
-                    pain_json,
-                    int(d.get("followers") or 0),
-                    str(d.get("stage") or "new"),
-                    str(d.get("created_at") or datetime.utcnow().isoformat()),
-                    datetime.utcnow().isoformat(),
-                )
+                "VALUES (%s, %s, %s, %s, %s, %s, "
+                "%s, %s, %s, "
+                "%s, %s, %s, "
+                "%s, %s, %s, %s)"
             )
+            args = (
+                name, website, phone, email, city, source,
+                linkedin, job_title, company,
+                seo_score, page_score, pain_json,
+                followers, stage, created_at, updated_at
+            )
+            print("[DB] Inserting: " + name + " | args count: " + str(len(args)))
+            cur.execute(sql, args)
             saved += 1
         except Exception as e:
-            print("[DB] Row error: " + repr(e)[:120])
+            errors += 1
+            print("[DB] Row error full: " + repr(e))
     conn.commit()
     cur.close()
     conn.close()
-    print("[DB] Saved " + str(saved) + " leads")
+    print("[DB] Saved " + str(saved) + " | Errors " + str(errors))
     return saved
 
 
