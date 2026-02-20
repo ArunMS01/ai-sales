@@ -50,35 +50,45 @@ def save_leads(leads):
     for lead in leads:
         d = lead if isinstance(lead, dict) else lead.__dict__
         try:
-            values = (
-                str(d.get("name") or ""),
-                str(d.get("website") or ""),
-                str(d.get("phone") or ""),
-                str(d.get("email") or ""),
-                str(d.get("city") or ""),
-                str(d.get("source") or ""),
-                str(d.get("linkedin_url") or ""),
-                str(d.get("job_title") or ""),
-                str(d.get("company") or ""),
-                d.get("seo_score") or None,
-                d.get("pagespeed_score") or None,
-                json.dumps(d.get("pain_points") or []),
-                int(d.get("followers") or 0),
-                str(d.get("stage") or "new"),
-                str(d.get("created_at") or datetime.utcnow().isoformat()),
-                datetime.utcnow().isoformat(),
+            # Sanitize pain_points — remove any % characters that confuse psycopg2
+            raw_pain = d.get("pain_points") or []
+            if isinstance(raw_pain, str):
+                try:
+                    raw_pain = json.loads(raw_pain)
+                except Exception:
+                    raw_pain = []
+            clean_pain = [str(p).replace("%", "pct") for p in raw_pain]
+            pain_json = json.dumps(clean_pain)
+
+            cur.execute(
+                "INSERT INTO leads "
+                "(name, website, phone, email, city, source, "
+                "linkedin_url, job_title, company, "
+                "seo_score, pagespeed_score, pain_points, "
+                "followers, stage, created_at, updated_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (
+                    str(d.get("name") or "")[:200],
+                    str(d.get("website") or "")[:500],
+                    str(d.get("phone") or "")[:50],
+                    str(d.get("email") or "")[:200],
+                    str(d.get("city") or "")[:100],
+                    str(d.get("source") or "")[:50],
+                    str(d.get("linkedin_url") or "")[:500],
+                    str(d.get("job_title") or "")[:200],
+                    str(d.get("company") or "")[:200],
+                    d.get("seo_score") or None,
+                    d.get("pagespeed_score") or None,
+                    pain_json,
+                    int(d.get("followers") or 0),
+                    str(d.get("stage") or "new"),
+                    str(d.get("created_at") or datetime.utcnow().isoformat()),
+                    datetime.utcnow().isoformat(),
+                )
             )
-            cur.execute("""
-                INSERT INTO leads
-                (name, website, phone, email, city, source,
-                 linkedin_url, job_title, company,
-                 seo_score, pagespeed_score, pain_points,
-                 followers, stage, created_at, updated_at)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-            """, values)
             saved += 1
         except Exception as e:
-            print("[DB] Row error: " + str(e)[:100])
+            print("[DB] Row error: " + repr(e)[:120])
     conn.commit()
     cur.close()
     conn.close()
