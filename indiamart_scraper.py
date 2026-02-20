@@ -7,16 +7,33 @@ from datetime import datetime
 from dataclasses import dataclass, asdict
 from typing import Optional
 
-# IndiaMART Official Lead Manager API
-# Sign up FREE at: https://seller.indiamart.com/lms/
-# Go to: My IndiaMART → Lead Manager → API Access
-# You get: INDIAMART_API_KEY and INDIAMART_MOBILE (your registered mobile)
-INDIAMART_API_KEY = os.getenv("INDIAMART_API_KEY", "")
-INDIAMART_MOBILE  = os.getenv("INDIAMART_MOBILE", "")
-
-# SerpAPI — real Google results including IndiaMART pages
-# Free: 100 searches/month at serpapi.com
 SERPAPI_KEY = os.getenv("SERPAPI_KEY", "")
+
+# ── Customizable Search Config ────────────────────────────────────────────────
+# Edit CATEGORIES and CITIES to target any niche + location
+CATEGORIES = {
+    "Chemicals": [
+        "chemical manufacturer kanpur",
+        "chemical supplier kanpur india",
+        "industrial chemical kanpur",
+        "chemical exporter kanpur uttar pradesh",
+        "agrochemical manufacturer kanpur",
+        "paint chemical manufacturer kanpur",
+        "cleaning chemical supplier kanpur",
+        "pharmaceutical chemical kanpur",
+    ],
+}
+TARGET_CITY = "Kanpur"
+
+PAIN_POINTS = {
+    "Chemicals": [
+        "only listed on IndiaMART — invisible on Google Search",
+        "no professional website — losing B2B buyers to competitors",
+        "buyers can't find product specs or MSDS sheets online",
+        "no online inquiry form — missing inbound leads daily",
+        "competitors with websites rank above them on Google",
+    ],
+}
 
 
 @dataclass
@@ -47,243 +64,234 @@ class IndiaMartLead:
             self.created_at = datetime.utcnow().isoformat()
 
 
-# ── Source 1: IndiaMART Official Lead Manager API ─────────────────────────────
-class IndiaMartAPISource:
+class ContactEnricher:
     """
-    Uses IndiaMART's official Lead Manager API.
-    FREE for all IndiaMART sellers.
-    Setup: https://seller.indiamart.com → Lead Manager → API
-    Returns: your own incoming buyer leads from IndiaMART
+    Visits the actual IndiaMART seller profile page and
+    extracts real phone numbers and emails from the page HTML.
     """
-    BASE_URL = "https://mapi.indiamart.com/wservce/crm/crmListing/v2/"
-
-    def get_leads(self, start_time=None, end_time=None):
-        if not INDIAMART_API_KEY or not INDIAMART_MOBILE:
-            print("[IndiaMartAPI] No credentials — set INDIAMART_API_KEY and INDIAMART_MOBILE")
-            return []
-
-        params = {
-            "glusr_trans_id": INDIAMART_API_KEY,
-            "mobile":         INDIAMART_MOBILE,
-            "start_time":     start_time or "01-Jan-2024 00:00:00",
-            "end_time":       end_time or datetime.utcnow().strftime("%d-%b-%Y %H:%M:%S"),
-        }
-        try:
-            resp = requests.get(self.BASE_URL, params=params, timeout=15)
-            print("[IndiaMartAPI] Status: " + str(resp.status_code))
-            if resp.status_code != 200:
-                print("[IndiaMartAPI] Error: " + resp.text[:200])
-                return []
-
-            data  = resp.json()
-            items = data.get("RESPONSE", data.get("response", []))
-            leads = []
-            for item in items:
-                company = item.get("SENDER_COMPANY", "") or item.get("sender_company", "")
-                name    = item.get("SENDER_NAME", "") or item.get("sender_name", company)
-                phone   = item.get("SENDER_MOBILE", "") or item.get("sender_mobile", "")
-                email   = item.get("SENDER_EMAIL", "") or item.get("sender_email", "")
-                city    = item.get("SENDER_CITY", "") or item.get("sender_city", "India")
-                product = item.get("QUERY_PRODUCT_NAME", "") or ""
-
-                leads.append(IndiaMartLead(
-                    name=name, company=company,
-                    website="", phone=phone, email=email,
-                    city=city, products=product,
-                    pain_points=[
-                        "only has IndiaMART microsite — no real website",
-                        "invisible on Google Search",
-                        "losing customers to competitors with real websites",
-                    ]
-                ))
-                print("[IndiaMartAPI] Lead: " + name + " | " + company + " | " + city)
-
-            print("[IndiaMartAPI] Got " + str(len(leads)) + " leads")
-            return leads
-
-        except Exception as e:
-            print("[IndiaMartAPI] Exception: " + str(e))
-            return []
-
-
-# ── Source 2: SerpAPI — search Google for IndiaMART seller pages ──────────────
-class SerpAPISource:
-    """
-    Uses SerpAPI to search Google for IndiaMART seller profiles.
-    Free: 100 searches/month
-    Sign up: https://serpapi.com
-    Add to Railway: SERPAPI_KEY=your_key
-    """
-    BASE_URL = "https://serpapi.com/search"
-
-    QUERIES = [
-        "site:indiamart.com clothing manufacturer contact",
-        "site:indiamart.com textile supplier india email",
-        "site:indiamart.com electronics manufacturer contact",
-        "site:indiamart.com led manufacturer india",
-        "site:indiamart.com food products manufacturer contact",
-        "site:indiamart.com spices supplier india email",
-        "site:indiamart.com furniture manufacturer contact",
-        "site:indiamart.com home decor supplier india",
-        "site:indiamart.com garment exporter contact email",
-        "site:indiamart.com handicraft manufacturer india",
-    ]
-
-    CATEGORY_MAP = {
-        "clothing": "Clothing & Textiles",
-        "textile":  "Clothing & Textiles",
-        "garment":  "Clothing & Textiles",
-        "electronics": "Electronics & Components",
-        "led":      "Electronics & Components",
-        "food":     "Food & Beverages",
-        "spices":   "Food & Beverages",
-        "furniture":"Furniture & Home Decor",
-        "decor":    "Furniture & Home Decor",
-        "handicraft":"Furniture & Home Decor",
+    HEADERS = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "text/html,application/xhtml+xml",
+        "Accept-Language": "en-IN,en;q=0.9",
     }
 
-    def __init__(self):
-        self.key = SERPAPI_KEY
+    def enrich(self, indiamart_url):
+        result = {"phone": "", "email": "", "owner": "", "company": "", "city": ""}
+        if not indiamart_url or "indiamart.com" not in indiamart_url:
+            return result
+        try:
+            resp = requests.get(indiamart_url, headers=self.HEADERS, timeout=12)
+            if resp.status_code != 200:
+                return result
+            html  = resp.text
+            text  = re.sub(r'<[^>]+>', ' ', html)  # strip HTML tags
 
-    def search(self, max_leads=100):
-        if not self.key:
-            print("[SerpAPI] No SERPAPI_KEY set — skipping")
-            return []
+            # ── Real phone numbers ────────────────────────────────────────────
+            # IndiaMART shows numbers in formats: +91-XXXXXXXXXX, 0XXXXXXXXXX, XXXXXXXXXX
+            phones = re.findall(r'(?:\+91[\s-]?|0)?[6-9]\d{9}', text)
+            # Filter out IndiaMART's own support numbers
+            skip_phones = ["9696969696", "8888888888", "1800"]
+            for p in phones:
+                digits = re.sub(r'\D', '', p)[-10:]
+                if digits and digits not in skip_phones and digits[:4] not in ["1800"]:
+                    result["phone"] = digits
+                    break
 
-        all_leads = []
-        seen = set()
+            # ── Real emails ───────────────────────────────────────────────────
+            emails = re.findall(r'[\w.+-]+@[\w-]+\.[a-zA-Z]{2,}', text)
+            skip_emails = ["indiamart", "example", "noreply", "support", "info@ind",
+                          "care@", "help@", "admin@ind", "b2b@"]
+            for e in emails:
+                if not any(s in e.lower() for s in skip_emails) and len(e) < 60:
+                    result["email"] = e
+                    break
 
-        for query in self.QUERIES:
-            if len(all_leads) >= max_leads:
-                break
-            try:
-                resp = requests.get(self.BASE_URL, params={
-                    "q":       query,
-                    "api_key": self.key,
-                    "num":     10,
-                    "hl":      "en",
-                    "gl":      "in",
-                }, timeout=15)
+            # ── Owner/contact name ────────────────────────────────────────────
+            for pattern in [
+                r'Contact Person[:\s]+([A-Z][a-zA-Z\s]{3,30})',
+                r'Mr\.\s+([A-Z][a-z]+\s+[A-Z][a-z]+)',
+                r'Ms\.\s+([A-Z][a-z]+\s+[A-Z][a-z]+)',
+                r'Mrs\.\s+([A-Z][a-z]+\s+[A-Z][a-z]+)',
+                r'Proprietor[:\s]+([A-Z][a-zA-Z\s]{3,25})',
+            ]:
+                m = re.search(pattern, html)
+                if m:
+                    result["owner"] = m.group(1).strip()
+                    break
 
-                if resp.status_code != 200:
-                    print("[SerpAPI] Error " + str(resp.status_code))
-                    continue
+            # ── Company name ──────────────────────────────────────────────────
+            company_match = re.search(r'<title[^>]*>([^<|–-]+)', html)
+            if company_match:
+                result["company"] = company_match.group(1).strip()[:80]
 
-                results = resp.json().get("organic_results", [])
-                print("[SerpAPI] Query: " + query[:50] + " → " + str(len(results)) + " results")
-
-                # Determine category from query
-                cat = "General"
-                for kw, c in self.CATEGORY_MAP.items():
-                    if kw in query:
-                        cat = c
+            # ── City verification ─────────────────────────────────────────────
+            if "kanpur" in text.lower():
+                result["city"] = "Kanpur"
+            else:
+                cities = ["Mumbai","Delhi","Bangalore","Hyderabad","Chennai",
+                         "Kolkata","Pune","Ahmedabad","Surat","Jaipur","Lucknow",
+                         "Noida","Gurugram","Indore","Agra","Varanasi","Allahabad"]
+                for c in cities:
+                    if c.lower() in text.lower():
+                        result["city"] = c
                         break
 
-                for r in results:
-                    title   = r.get("title", "")
-                    snippet = r.get("snippet", "")
-                    link    = r.get("link", "")
+        except Exception as e:
+            print("[Enricher] Error for " + indiamart_url[:60] + ": " + str(e))
+        return result
 
-                    if "indiamart.com" not in link:
+
+class SerpAPISource:
+    BASE_URL = "https://serpapi.com/search"
+
+    def search(self, query, num=10):
+        if not SERPAPI_KEY:
+            print("[SerpAPI] No SERPAPI_KEY set")
+            return []
+        try:
+            resp = requests.get(self.BASE_URL, params={
+                "q":       "site:indiamart.com " + query,
+                "api_key": SERPAPI_KEY,
+                "num":     num,
+                "hl":      "en",
+                "gl":      "in",
+            }, timeout=15)
+
+            if resp.status_code != 200:
+                print("[SerpAPI] Error " + str(resp.status_code))
+                return []
+
+            results = resp.json().get("organic_results", [])
+            print("[SerpAPI] '" + query + "' → " + str(len(results)) + " results")
+            return results
+
+        except Exception as e:
+            print("[SerpAPI] Exception: " + str(e))
+            return []
+
+
+class IndiaMartLeadPipeline:
+
+    def __init__(self):
+        self.serp     = SerpAPISource()
+        self.enricher = ContactEnricher()
+
+    def clear_old_leads(self):
+        """Delete all existing leads from DB for a fresh start."""
+        try:
+            from database import get_conn
+            conn = get_conn()
+            cur  = conn.cursor()
+            cur.execute("DELETE FROM leads")
+            conn.commit()
+            count = cur.rowcount
+            cur.close()
+            conn.close()
+            print("[DB] Cleared " + str(count) + " old leads")
+        except Exception as e:
+            print("[DB] Clear error: " + str(e))
+
+    def run(self, max_per_category=25, clear_first=True):
+        if clear_first:
+            print("=== Clearing old leads ===")
+            self.clear_old_leads()
+
+        all_leads = []
+        seen      = set()
+
+        for category, queries in CATEGORIES.items():
+            print("\n=== Category: " + category + " | City: " + TARGET_CITY + " ===")
+            cat_leads = []
+
+            for query in queries:
+                if len(cat_leads) >= max_per_category:
+                    break
+
+                results = self.serp.search(query, num=10)
+
+                for r in results:
+                    title        = r.get("title", "").strip()
+                    link         = r.get("link", "")
+                    snippet      = r.get("snippet", "")
+                    displayed    = r.get("displayed_link", "")
+
+                    if not link or "indiamart.com" not in link:
+                        continue
+
+                    # Skip IndiaMART homepage / category pages — want seller pages only
+                    if link in ["https://www.indiamart.com/", "https://dir.indiamart.com/"]:
                         continue
                     if title in seen:
                         continue
                     seen.add(title)
 
-                    # Extract phone from snippet
-                    phones = re.findall(r'[6-9]\d{9}', snippet)
-                    phone  = phones[0] if phones else ""
+                    # Extract what we can from snippet immediately
+                    phones  = re.findall(r'[6-9]\d{9}', snippet)
+                    emails  = re.findall(r'[\w.+-]+@[\w-]+\.[a-zA-Z]{2,}', snippet)
+                    phone   = phones[0] if phones else ""
+                    email   = emails[0] if emails and "indiamart" not in emails[0] else ""
 
-                    # Extract email from snippet
-                    emails = re.findall(r'[\w.+-]+@[\w-]+\.[a-zA-Z]{2,}', snippet)
-                    email  = emails[0] if emails else ""
+                    # Build IndiaMART subdomain as website
+                    subdomain_match = re.search(r'https?://([^.]+)\.indiamart\.com', link)
+                    website = ("https://" + subdomain_match.group(1) + ".indiamart.com") if subdomain_match else link
 
-                    # Extract city
-                    city = "India"
-                    indian_cities = ["Mumbai","Delhi","Bangalore","Hyderabad","Chennai",
-                                    "Kolkata","Pune","Ahmedabad","Surat","Jaipur",
-                                    "Lucknow","Noida","Gurugram","Indore","Bhopal"]
-                    for c in indian_cities:
-                        if c.lower() in snippet.lower():
-                            city = c
-                            break
+                    pain = PAIN_POINTS.get(category, [
+                        "only listed on IndiaMART — invisible on Google",
+                        "no professional website",
+                        "missing inbound leads from Google Search",
+                    ])
 
-                    # Build IndiaMART subdomain website
-                    website = ""
-                    match = re.search(r'https?://([^.]+)\.indiamart\.com', link)
-                    if match:
-                        website = "https://" + match.group(1) + ".indiamart.com"
-
-                    all_leads.append(IndiaMartLead(
-                        name=title[:60],
-                        company=title[:60],
-                        website=website or link,
+                    lead = IndiaMartLead(
+                        name=title[:80],
+                        company=title[:80],
+                        website=website,
                         phone=phone,
                         email=email,
-                        city=city,
-                        category=cat,
+                        city=TARGET_CITY,
+                        category=category,
                         indiamart_url=link,
-                        products=snippet[:100],
-                        pain_points=[
-                            "only has IndiaMART microsite — no real website",
-                            "invisible on Google Search — losing customers daily",
-                            "no SEO presence — competitors ranking above them",
-                        ]
-                    ))
-                    print("[SerpAPI] Found: " + title[:50] + " | " + city)
+                        products=snippet[:150],
+                        pain_points=pain[:3],
+                    )
+                    cat_leads.append(lead)
+                    print("[Found] " + title[:50] + " | phone=" + (phone or "—") + " | email=" + (email or "—"))
 
                 time.sleep(1)
 
-            except Exception as e:
-                print("[SerpAPI] Exception: " + str(e))
+            # ── Enrich top 15 leads with real contact details ─────────────────
+            print("\n[Enriching] Visiting " + str(min(15, len(cat_leads))) + " IndiaMART profiles for real contacts...")
+            for i, lead in enumerate(cat_leads[:15]):
+                details = self.enricher.enrich(lead.indiamart_url)
+                if details["phone"]:
+                    lead.phone = details["phone"]
+                    print("  ✅ Phone: " + details["phone"] + " for " + lead.company[:40])
+                if details["email"]:
+                    lead.email = details["email"]
+                    print("  ✅ Email: " + details["email"] + " for " + lead.company[:40])
+                if details["owner"]:
+                    lead.name = details["owner"]
+                    lead.job_title = "Owner / Proprietor"
+                if details["city"]:
+                    lead.city = details["city"]
+                cat_leads[i] = lead
+                time.sleep(2)  # polite delay
 
-        print("[SerpAPI] Total: " + str(len(all_leads)) + " leads")
-        return all_leads
+            all_leads.extend(cat_leads[:max_per_category])
+            print("[" + category + "] Done: " + str(len(cat_leads)) + " leads | with phone: " +
+                  str(sum(1 for l in cat_leads if l.phone)) + " | with email: " +
+                  str(sum(1 for l in cat_leads if l.email)))
 
-
-# ── Main Pipeline ─────────────────────────────────────────────────────────────
-class IndiaMartLeadPipeline:
-
-    def __init__(self):
-        self.api_source  = IndiaMartAPISource()
-        self.serp_source = SerpAPISource()
-
-    def run(self, max_per_category=25):
-        all_leads = []
-        seen = set()
-
-        def add(leads):
-            for l in leads:
-                key = (l.company or l.name).lower().strip()
-                if key and key not in seen:
-                    seen.add(key)
-                    all_leads.append(l)
-
-        # Source 1: IndiaMART Official API (if credentials set)
-        print("\n=== Source 1: IndiaMART Lead Manager API ===")
-        add(self.api_source.get_leads())
-
-        # Source 2: SerpAPI Google Search (if key set)
-        print("\n=== Source 2: SerpAPI Google Search ===")
-        add(self.serp_source.search(max_leads=max_per_category * 4))
-
-        print("\n=== Total: " + str(len(all_leads)) + " IndiaMART leads ===")
-
-        if not all_leads:
-            print("[Pipeline] 0 leads found.")
-            print("[Pipeline] To get leads, set one of:")
-            print("  INDIAMART_API_KEY + INDIAMART_MOBILE (free from seller.indiamart.com)")
-            print("  SERPAPI_KEY (free 100/mo from serpapi.com)")
-            return []
+        print("\n=== Total leads: " + str(len(all_leads)) + " ===")
 
         # Save to DB
-        try:
-            from database import init_db, save_leads
-            init_db()
-            saved = save_leads([asdict(l) for l in all_leads])
-            print("[DB] Saved " + str(saved) + " leads")
-        except Exception as e:
-            print("[DB] Error: " + str(e))
+        if all_leads:
+            try:
+                from database import init_db, save_leads
+                init_db()
+                saved = save_leads([asdict(l) for l in all_leads])
+                print("[DB] Saved " + str(saved) + " leads")
+            except Exception as e:
+                print("[DB] Error: " + str(e))
 
         return all_leads
 
@@ -291,6 +299,6 @@ class IndiaMartLeadPipeline:
 if __name__ == "__main__":
     pipeline = IndiaMartLeadPipeline()
     leads = pipeline.run(max_per_category=25)
-    print("\nTop 10:")
+    print("\nTop 10 leads with contacts:")
     for l in leads[:10]:
-        print(l.company, "|", l.city, "|", l.phone, "|", l.website)
+        print(l.company[:40], "|", l.city, "|", l.phone, "|", l.email)
