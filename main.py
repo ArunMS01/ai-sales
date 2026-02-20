@@ -129,7 +129,7 @@ async def dashboard():
     <div class="panel-body">
       <div class="actions-row">
         <button class="btn btn-primary" onclick="runPipeline()">▶ Source Leads</button>
-        <button class="btn btn-green" onclick="seedLeads()">🌱 Load Seed Leads</button>
+
         <button class="btn" style="background:#e1306c;color:white" onclick="runInstagram()">🔍 Find D2C Brands</button>
         <button class="btn" style="background:#f97316;color:white" onclick="runIndiamart()">🏭 Scrape IndiaMART</button>
         <button class="btn btn-ghost" onclick="refreshAll()">↻ Refresh</button>
@@ -190,8 +190,7 @@ async def dashboard():
         <table class="leads-table">
           <thead>
             <tr>
-              <th>Name</th><th>Company</th><th>Phone / WhatsApp</th>
-              <th>Email</th><th>City</th><th>Website</th><th>Stage</th><th>Pain Points</th><th>Action</th>
+              <th>Name</th><th>Company</th><th>Phone</th><th>Email</th><th>City</th><th>Website</th><th>Stage</th><th>Pain Points</th><th>Action</th>
             </tr>
           </thead>
           <tbody id="leadsBody">
@@ -247,18 +246,44 @@ async function loadLeads(stage='') {
 function renderLeads(leads) {
   const body = document.getElementById('leadsBody');
   if (!leads.length) {
-    body.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#64748b;padding:30px">No leads yet — click Load Seed Leads</td></tr>';
+    body.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#64748b;padding:30px">No leads yet — click Load Seed Leads or Scrape IndiaMART</td></tr>';
     return;
   }
   body.innerHTML = leads.map(l => {
     const badge = 'badge-' + (l.stage || 'new');
     const pain  = (l.pain_points || []).slice(0,2).map(p => '<span class="tag">' + p + '</span>').join(' ');
+
+    // Phone — clickable WhatsApp link
+    const rawPhone = (l.phone || '').toString().replace(/[^0-9]/g, '').slice(-10);
+    const phone = rawPhone
+      ? '<a href="https://wa.me/91' + rawPhone + '" target="_blank" style="color:#25d366;font-weight:600">📱 ' + rawPhone + '</a>'
+      : '<span style="color:#4b5563">—</span>';
+
+    // Email — mailto link
+    const email = l.email
+      ? '<a href="mailto:' + l.email + '" style="color:#a78bfa;font-size:0.75rem">' + l.email + '</a>'
+      : '<span style="color:#4b5563">—</span>';
+
+    // City — clean text only
+    const city = (l.city || 'India').split(',')[0].trim();
+
+    // Website — colour coded
+    const site = l.website || '';
+    const siteLabel = site.includes('wa.me') ? '💬 WhatsApp'
+                    : site.replace('https://','').replace('http://','').split('/')[0] || '—';
+    const siteColor = site.includes('wa.me') ? '#25d366'
+                    : site.includes('indiamart') ? '#64748b' : '#a78bfa';
+    const siteHtml = site
+      ? '<a href="' + site + '" target="_blank" style="color:' + siteColor + ';font-size:0.75rem">' + siteLabel + '</a>'
+      : '<span style="color:#4b5563">—</span>';
+
     return '<tr>' +
-      '<td>' + (l.name || '') + '</td>' +
-      '<td>' + (l.company || '') + '</td>' +
-      '<td><a href="' + (l.website||'#') + '" target="_blank" style="color:#a78bfa">' + (l.website||'').replace('https://','') + '</a></td>' +
-      '<td>' + (l.city || '') + '</td>' +
-      '<td style="font-size:0.75rem">' + (l.email || '<span style="color:#4b5563">—</span>') + '</td>' +
+      '<td>' + (l.name || '—') + '</td>' +
+      '<td>' + (l.company || '—') + '</td>' +
+      '<td>' + phone + '</td>' +
+      '<td>' + email + '</td>' +
+      '<td>' + city + '</td>' +
+      '<td>' + siteHtml + '</td>' +
       '<td><span class="badge ' + badge + '">' + (l.stage||'new') + '</span></td>' +
       '<td>' + pain + '</td>' +
       '<td><button class="btn btn-ghost" style="padding:4px 10px;font-size:0.72rem" onclick="selectLead(' + JSON.stringify(JSON.stringify(l)) + ')">Chat</button></td>' +
@@ -380,24 +405,7 @@ async function runInstagram() {
   }
 }
 
-async function seedLeads() {
-  addLog('Loading seed leads...', 'info');
-  updateProgress(10, 'Loading seed founders list...');
-  try {
-    const r = await fetch('/leads/seed');
-    const d = await r.json();
-    if (d.status === 'ok') {
-      addLog('Saved ' + d.saved + ' seed leads!', 'success');
-      updateProgress(100, 'Done!');
-      setTimeout(() => { loadLeads(); loadStats(); updateProgress(0, 'Ready'); }, 1000);
-    } else {
-      addLog('Error: ' + d.error, 'error');
-      updateProgress(0, 'Error');
-    }
-  } catch(e) {
-    addLog('Error: ' + e.message, 'error');
-  }
-}
+
 
 async function runPipeline() {
   addLog('Starting full pipeline...', 'info');
@@ -524,22 +532,7 @@ async def run_instagram(background_tasks: BackgroundTasks):
 
 
 # ── Leads Seed ────────────────────────────────────────────────────────────────
-@app.get("/leads/seed")
-async def seed_leads():
-    try:
-        from database import init_db, save_leads
-        from dataclasses import asdict
-        init_db()
-        from module1_lead_sourcing import SeedLeadSource
-        leads = SeedLeadSource().get_leads()
-        for l in leads:
-            l.pain_points = ["poor SEO ranking", "low website traffic", "weak online presence"]
-        saved = save_leads([asdict(l) for l in leads])
-        log("Seed leads saved: " + str(saved))
-        return {"status": "ok", "saved": saved}
-    except Exception as e:
-        log("Seed error: " + str(e))
-        return {"status": "error", "error": str(e)}
+
 
 
 # ── Leads Run ─────────────────────────────────────────────────────────────────
@@ -557,6 +550,24 @@ async def run_leads(background_tasks: BackgroundTasks):
     return HTMLResponse("""<html><body style="background:#0f1117;color:#a78bfa;font-family:Arial;padding:40px;text-align:center">
         <h2>Pipeline started!</h2><p style="color:#64748b">Go back to <a href="/" style="color:#a78bfa">dashboard</a> to watch live progress.</p>
         </body></html>""")
+
+
+# ── Clear non-IndiaMART leads ────────────────────────────────────────────────
+@app.get("/leads/clear-old")
+async def clear_old():
+    try:
+        from database import get_conn
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM leads WHERE source != 'indiamart'")
+        conn.commit()
+        deleted = cur.rowcount
+        cur.close()
+        conn.close()
+        log("Cleared " + str(deleted) + " non-IndiaMART leads")
+        return {"status": "ok", "deleted": deleted}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
 
 
 # ── Leads List ────────────────────────────────────────────────────────────────
