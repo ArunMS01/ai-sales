@@ -38,6 +38,14 @@ def init_db():
     conn.commit()
     cur.close()
     conn.close()
+    # Add followers column if missing (migration)
+    try:
+        cur2 = conn.cursor()
+        cur2.execute("ALTER TABLE leads ADD COLUMN IF NOT EXISTS followers INTEGER DEFAULT 0")
+        conn.commit()
+        cur2.close()
+    except Exception:
+        conn.rollback()
     print("[DB] Table ready")
 
 
@@ -95,11 +103,12 @@ def save_leads(leads):
             )
             print("[DB] Inserting: " + name + " | args count: " + str(len(args)))
             cur.execute(sql, args)
+            conn.commit()
             saved += 1
         except Exception as e:
+            conn.rollback()
             errors += 1
             print("[DB] Row error full: " + repr(e))
-    conn.commit()
     cur.close()
     conn.close()
     print("[DB] Saved " + str(saved) + " | Errors " + str(errors))
