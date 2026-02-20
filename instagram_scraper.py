@@ -1,70 +1,29 @@
 import os
 import json
 import time
+import re
 import requests
 from datetime import datetime
 from dataclasses import dataclass, asdict
 from typing import Optional
 
-# No API key needed — uses Instagram's public endpoints
-# Rate limit: ~200 requests/hour per IP (Railway IP is shared, so be conservative)
-
-INSTAGRAM_HASHTAGS = [
-    "madeinindia",
-    "indianbrand",
-    "d2cindia",
-    "indianfashion",
-    "indiane commerce",
-    "shopindian",
-    "vocalforlocal",
-    "indianstartup",
-    "indiad2c",
-    "indianbeauty",
-    "indianwear",
-    "handmadeinindia",
-    "indiantextile",
-    "indianjewelry",
-    "indianfoodbrand",
-]
-
-# Keywords that indicate a BRAND account (not personal)
-BRAND_KEYWORDS = [
-    "shop", "store", "brand", "official", "collection", "wear",
-    "fashion", "beauty", "skincare", "apparel", "clothing",
-    "jewel", "home", "decor", "food", "organic", "natural",
-    "handmade", "craft", "studio", "co.", "pvt", "ltd"
-]
-
-# Keywords that indicate it's NOT a useful lead
-SKIP_KEYWORDS = [
-    "photography", "photographer", "blogger", "influencer",
-    "model", "artist", "musician", "actor", "coach", "trainer",
-    "motivational", "spiritual", "astro", "news", "media"
-]
-
-
+# ── Lead dataclass (compatible with existing DB schema) ───────────────────────
 @dataclass
 class InstagramLead:
-    username: str
-    full_name: str
-    bio: str
+    name: str
     website: str
+    phone: str
     email: str
-    followers: int
-    following: int
-    posts: int
-    profile_url: str
-    category: str
-    city: str = "India"
-    source: str = "instagram"
-    stage: str = "new"
-    pain_points: list = None
-    company: str = ""
-    job_title: str = ""
-    phone: str = ""
+    city: str
+    source: str
     linkedin_url: str = ""
+    job_title: str = ""
+    company: str = ""
     seo_score: Optional[int] = None
     pagespeed_score: Optional[int] = None
+    pain_points: list = None
+    followers: int = 0
+    stage: str = "new"
     created_at: str = ""
 
     def __post_init__(self):
@@ -72,263 +31,227 @@ class InstagramLead:
             self.pain_points = []
         if not self.created_at:
             self.created_at = datetime.utcnow().isoformat()
-        if not self.company:
-            self.company = self.full_name or self.username
 
 
-class InstagramScraper:
+# ── Google Search Scraper ─────────────────────────────────────────────────────
+class GoogleSearchScraper:
     """
-    Scrapes Instagram public data using:
-    1. Hashtag search (no auth needed)
-    2. Profile lookup by username (no auth needed)
-
-    Uses Instagram's internal web API endpoints — same ones
-    the browser uses when you visit instagram.com
+    Searches Google for Indian D2C / e-commerce brands using
+    public search queries. No API key needed.
+    Finds real businesses with websites that need digital marketing.
     """
 
     HEADERS = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "*/*",
+        "Accept": "text/html,application/xhtml+xml",
         "Accept-Language": "en-US,en;q=0.9",
-        "Referer": "https://www.instagram.com/",
-        "X-IG-App-ID": "936619743392459",
     }
 
-    def __init__(self):
-        self.session = requests.Session()
-        self.session.headers.update(self.HEADERS)
-        self._get_csrf_token()
+    SEARCHES = [
+        # Find Shopify stores in India
+        'site:myshopify.com "india" fashion clothing',
+        'site:myshopify.com "india" beauty skincare',
+        'site:myshopify.com "india" jewelry accessories',
+        # Find WooCommerce stores in India
+        '"wp-content" "india" ecommerce clothing store',
+        # Find small D2C brands directly
+        '"buy now" "free shipping india" clothing brand',
+        '"shop now" "made in india" skincare brand',
+        '"cash on delivery" "india" fashion brand site:in',
+        # Find brands on specific platforms
+        'site:instamojo.com india fashion store',
+        'site:shiprocket.in india d2c brand',
+        # City-specific searches
+        '"mumbai" "online store" fashion brand contact email',
+        '"bangalore" "online store" skincare brand contact',
+        '"delhi" "online store" clothing brand email',
+        '"pune" "ecommerce" fashion brand founder email',
+        '"hyderabad" "online store" brand contact',
+    ]
 
-    def _get_csrf_token(self):
+    def search(self, query, max_results=10):
+        """Search Google and extract website URLs from results."""
+        results = []
         try:
-            resp = self.session.get("https://www.instagram.com/", timeout=10)
-            for cookie in resp.cookies:
-                if cookie.name == "csrftoken":
-                    self.session.headers["X-CSRFToken"] = cookie.value
-                    break
-        except Exception as e:
-            print("[Instagram] CSRF error: " + str(e))
+            url = "https://www.google.com/search?q=" + requests.utils.quote(query) + "&num=10"
+            resp = requests.get(url, headers=self.HEADERS, timeout=15)
 
-    def search_hashtag(self, hashtag, max_accounts=20):
-        """Search a hashtag and return brand accounts."""
-        url = "https://www.instagram.com/api/v1/tags/web_info/?tag_name=" + hashtag
-        try:
-            resp = self.session.get(url, timeout=15)
-            if resp.status_code == 429:
-                print("[Instagram] Rate limited on hashtag " + hashtag + " — waiting 30s")
-                time.sleep(30)
-                return []
             if resp.status_code != 200:
-                print("[Instagram] Hashtag error " + str(resp.status_code) + " for #" + hashtag)
+                print("[Google] Status " + str(resp.status_code) + " for: " + query[:50])
                 return []
 
-            data     = resp.json()
-            sections = data.get("data", {}).get("recent", {}).get("sections", [])
-            usernames = set()
+            html = resp.text
 
-            for section in sections:
-                for layout in section.get("layout_content", {}).get("medias", []):
-                    media = layout.get("media", {})
-                    user  = media.get("user", {})
-                    username = user.get("username", "")
-                    if username:
-                        usernames.add(username)
+            # Extract URLs from Google results
+            urls = re.findall(r'href="(https?://[^"&]+)"', html)
+            seen = set()
+            for u in urls:
+                # Skip Google's own URLs and junk
+                skip = ["google.", "youtube.", "facebook.", "instagram.", "twitter.",
+                        "amazon.", "flipkart.", "linkedin.", "wikipedia.", "quora.",
+                        "reddit.", "medium.", "github.", "indiamart.", "justdial."]
+                if any(s in u for s in skip):
+                    continue
+                domain = re.sub(r'https?://(www\.)?', '', u).split('/')[0]
+                if domain and domain not in seen and '.' in domain:
+                    seen.add(domain)
+                    results.append("https://" + domain)
+                if len(results) >= max_results:
+                    break
 
-            print("[Instagram] #" + hashtag + " found " + str(len(usernames)) + " accounts")
-            return list(usernames)[:max_accounts]
+            print("[Google] Query: " + query[:60] + " → " + str(len(results)) + " sites")
+            return results
 
         except Exception as e:
-            print("[Instagram] Hashtag exception: " + str(e))
+            print("[Google] Error: " + str(e))
             return []
 
-    def get_profile(self, username):
-        """Get full profile info for a username."""
-        url = "https://www.instagram.com/api/v1/users/web_profile_info/?username=" + username
-        try:
-            resp = self.session.get(url, timeout=15)
-            if resp.status_code == 404:
-                return None
-            if resp.status_code == 429:
-                print("[Instagram] Rate limited — waiting 60s")
-                time.sleep(60)
-                return None
-            if resp.status_code != 200:
-                return None
 
-            user = resp.json().get("data", {}).get("user", {})
-            if not user:
-                return None
-            return user
+class WebsiteAnalyzer:
+    """Fetch a website and extract contact info + business signals."""
+
+    HEADERS = {
+        "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1)",
+        "Accept": "text/html",
+    }
+
+    def analyze(self, url):
+        """Returns dict with name, email, phone, city, pain_points."""
+        result = {
+            "website": url,
+            "name": "",
+            "email": "",
+            "phone": "",
+            "city": "India",
+            "pain_points": [],
+            "company": "",
+        }
+        try:
+            resp = requests.get(url, headers=self.HEADERS, timeout=10)
+            if resp.status_code != 200:
+                return result
+            html = resp.text.lower()
+
+            # Extract email
+            emails = re.findall(r'[\w.+-]+@[\w-]+\.[a-zA-Z]{2,}', html)
+            # Filter out generic/spam emails
+            skip_emails = ["example", "test", "noreply", "no-reply", "support@shopify",
+                          "privacy", "legal", "abuse", "admin@wordpress"]
+            for e in emails:
+                if not any(s in e for s in skip_emails) and len(e) < 60:
+                    result["email"] = e
+                    break
+
+            # Extract phone
+            phones = re.findall(r'(?:\+91|0)?[6-9]\d{9}', html)
+            if phones:
+                result["phone"] = phones[0]
+
+            # Extract city
+            cities = ["mumbai", "delhi", "bangalore", "bengaluru", "hyderabad",
+                     "chennai", "kolkata", "pune", "ahmedabad", "surat",
+                     "jaipur", "noida", "gurugram", "gurgaon", "indore"]
+            for city in cities:
+                if city in html:
+                    result["city"] = city.title()
+                    break
+
+            # Extract business name from title tag
+            title = re.search(r'<title[^>]*>([^<]+)</title>', resp.text, re.IGNORECASE)
+            if title:
+                name = title.group(1).strip()
+                name = re.sub(r'\s*[\|–-].*$', '', name).strip()
+                result["name"]    = name[:60]
+                result["company"] = name[:60]
+
+            # Score pain points
+            pain = []
+            if "shopify" in html or "myshopify" in html:
+                pain.append("Shopify store needs SEO optimization")
+            if "woocommerce" in html:
+                pain.append("WooCommerce store needs SEO optimization")
+            if not re.search(r'google-analytics|gtag|ga\.js', html):
+                pain.append("no Google Analytics — flying blind on traffic")
+            if not re.search(r'pixel|fbq|facebook.*pixel', html):
+                pain.append("no Facebook Pixel — missing retargeting")
+            if not re.search(r'schema\.org|application/ld\+json', html):
+                pain.append("no schema markup — poor SEO structure")
+            if "cash on delivery" in html or "cod" in html:
+                pain.append("COD-heavy store — needs better digital ads to reduce returns")
+            pain.append("low organic traffic from Google")
+            result["pain_points"] = pain[:3]
 
         except Exception as e:
-            print("[Instagram] Profile error for " + username + ": " + str(e))
-            return None
-
-    def is_brand_account(self, user):
-        """Returns True if this looks like a D2C brand, not a personal account."""
-        bio      = (user.get("biography") or "").lower()
-        name     = (user.get("full_name") or "").lower()
-        category = (user.get("category_name") or "").lower()
-        is_biz   = user.get("is_business_account", False)
-        followers = user.get("edge_followed_by", {}).get("count", 0)
-
-        # Skip personal accounts
-        for skip in SKIP_KEYWORDS:
-            if skip in bio or skip in name:
-                return False
-
-        # Must have a website link
-        website = user.get("external_url") or user.get("bio_links", [{}])[0].get("url", "") if user.get("bio_links") else ""
-        if not website:
-            return False
-
-        # Follower range: 1k to 500k (too big = already has agency, too small = not real biz)
-        if followers < 1000 or followers > 500000:
-            return False
-
-        # Check brand signals
-        has_brand_keyword = any(k in bio or k in name for k in BRAND_KEYWORDS)
-        if is_biz or has_brand_keyword or "shop" in category or "retail" in category:
-            return True
-
-        return False
-
-    def extract_email_from_bio(self, bio):
-        """Extract email if mentioned in bio."""
-        import re
-        match = re.search(r'[\w.+-]+@[\w-]+\.[a-zA-Z]{2,}', bio or "")
-        return match.group(0) if match else ""
-
-    def extract_city_from_bio(self, bio):
-        """Try to extract Indian city from bio."""
-        cities = [
-            "mumbai", "delhi", "bangalore", "bengaluru", "hyderabad",
-            "chennai", "kolkata", "pune", "ahmedabad", "surat",
-            "jaipur", "lucknow", "kanpur", "nagpur", "indore",
-            "thane", "bhopal", "visakhapatnam", "noida", "gurugram",
-            "gurgaon", "chandigarh", "coimbatore", "kochi"
-        ]
-        bio_lower = (bio or "").lower()
-        for city in cities:
-            if city in bio_lower:
-                return city.title()
-        return "India"
-
-    def score_pain_points(self, user, followers):
-        """Determine pain points based on profile signals."""
-        pain = []
-        bio  = (user.get("biography") or "").lower()
-
-        if followers < 10000:
-            pain.append("low social media reach")
-        if "dm" in bio or "whatsapp" in bio:
-            pain.append("no proper website — selling via DMs")
-        if not user.get("external_url"):
-            pain.append("no website — missing online store")
-        else:
-            pain.append("poor SEO ranking")
-            pain.append("low website traffic")
-        if followers < 5000:
-            pain.append("weak online presence")
-        if "new" in bio or "launch" in bio or "started" in bio:
-            pain.append("new brand needs digital foundation")
-
-        return pain[:3]
-
-    def scrape_leads(self, max_leads=100):
-        """Main method — search hashtags and return brand leads."""
-        leads      = []
-        seen       = set()
-        usernames  = []
-
-        # Collect usernames from hashtags
-        print("[Instagram] Searching " + str(len(INSTAGRAM_HASHTAGS)) + " hashtags...")
-        for tag in INSTAGRAM_HASHTAGS:
-            if len(usernames) >= max_leads * 3:
-                break
-            new_users = self.search_hashtag(tag, max_accounts=20)
-            for u in new_users:
-                if u not in seen:
-                    seen.add(u)
-                    usernames.append(u)
-            time.sleep(2)  # be respectful
-
-        print("[Instagram] Collected " + str(len(usernames)) + " unique usernames")
-
-        # Get profiles and filter brands
-        print("[Instagram] Fetching profiles...")
-        for username in usernames:
-            if len(leads) >= max_leads:
-                break
-            user = self.get_profile(username)
-            if not user:
-                time.sleep(1)
-                continue
-
-            if not self.is_brand_account(user):
-                time.sleep(0.5)
-                continue
-
-            followers = user.get("edge_followed_by", {}).get("count", 0)
-            following = user.get("edge_follow", {}).get("count", 0)
-            posts     = user.get("edge_owner_to_timeline_media", {}).get("count", 0)
-            bio       = user.get("biography") or ""
-            website   = user.get("external_url") or ""
-            if not website and user.get("bio_links"):
-                website = user["bio_links"][0].get("url", "")
-
-            email      = self.extract_email_from_bio(bio)
-            city       = self.extract_city_from_bio(bio)
-            pain       = self.score_pain_points(user, followers)
-            category   = user.get("category_name") or "E-Commerce"
-            full_name  = user.get("full_name") or username
-
-            lead = InstagramLead(
-                username=username,
-                full_name=full_name,
-                bio=bio[:200],
-                website=website,
-                email=email,
-                followers=followers,
-                following=following,
-                posts=posts,
-                profile_url="https://instagram.com/" + username,
-                category=category,
-                city=city,
-                pain_points=pain,
-                company=full_name,
-                job_title="Founder / Owner",
-            )
-            leads.append(lead)
-            print("[Instagram] Brand found: @" + username + " | " + str(followers) + " followers | " + website)
-            time.sleep(1.5)
-
-        print("[Instagram] Total brand leads: " + str(len(leads)))
-        return leads
+            print("[Analyzer] Error for " + url + ": " + str(e))
+        return result
 
 
 class InstagramLeadPipeline:
+    """
+    Renamed to keep compatibility with main.py imports.
+    Actually uses Google Search to find D2C brands.
+    """
+
     def __init__(self):
-        self.scraper = InstagramScraper()
+        self.google   = GoogleSearchScraper()
+        self.analyzer = WebsiteAnalyzer()
 
     def run(self, max_leads=100):
-        print("\n=== Instagram D2C Brand Scraper ===")
-        leads = self.scraper.scrape_leads(max_leads=max_leads)
+        print("\n=== Google Search D2C Brand Finder ===")
+        all_urls = []
+        seen_domains = set()
 
-        if not leads:
-            print("[Instagram] No leads found")
-            return []
+        # Step 1: Search Google
+        print("\n[Step 1] Searching Google for Indian D2C brands...")
+        for query in self.google.SEARCHES:
+            if len(all_urls) >= max_leads * 2:
+                break
+            urls = self.google.search(query, max_results=10)
+            for u in urls:
+                domain = re.sub(r'https?://(www\.)?', '', u).split('/')[0]
+                if domain not in seen_domains:
+                    seen_domains.add(domain)
+                    all_urls.append(u)
+            time.sleep(3)  # respectful delay between Google requests
+
+        print("\n[Step 2] Analyzing " + str(len(all_urls)) + " websites...")
+        leads = []
+        for url in all_urls:
+            if len(leads) >= max_leads:
+                break
+            info = self.analyzer.analyze(url)
+
+            # Must have at least a name and some contact info
+            if not info["name"]:
+                time.sleep(0.5)
+                continue
+
+            lead = InstagramLead(
+                name=info["name"],
+                website=url,
+                phone=info["phone"],
+                email=info["email"],
+                city=info["city"],
+                source="google_search",
+                job_title="Founder / Owner",
+                company=info["company"],
+                pain_points=info["pain_points"],
+            )
+            leads.append(lead)
+            print("[Found] " + info["name"] + " | " + url + " | " + info["city"])
+            time.sleep(1)
+
+        print("\n[Done] Found " + str(len(leads)) + " D2C brand leads")
 
         # Save to DB
-        try:
-            from database import init_db, save_leads
-            init_db()
-            saved = save_leads([asdict(l) for l in leads])
-            print("[Instagram] Saved " + str(saved) + " leads to DB")
-        except Exception as e:
-            print("[Instagram] DB error: " + str(e))
-            with open("instagram_leads.json", "w") as f:
-                json.dump([asdict(l) for l in leads], f, indent=2)
+        if leads:
+            try:
+                from database import init_db, save_leads
+                init_db()
+                saved = save_leads([asdict(l) for l in leads])
+                print("[DB] Saved " + str(saved) + " leads")
+            except Exception as e:
+                print("[DB] Error: " + str(e))
 
         return leads
 
@@ -336,6 +259,6 @@ class InstagramLeadPipeline:
 if __name__ == "__main__":
     pipeline = InstagramLeadPipeline()
     leads = pipeline.run(max_leads=50)
-    print("\nTop 5 Instagram leads:")
+    print("\nTop 5:")
     for l in leads[:5]:
-        print("@" + l.username + " | " + l.full_name + " | " + str(l.followers) + " followers | " + l.website)
+        print(l.name, "|", l.website, "|", l.email, "|", l.city)
