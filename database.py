@@ -1,4 +1,3 @@
-#python v5
 import os
 import json
 import psycopg2
