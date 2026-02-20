@@ -130,7 +130,7 @@ async def dashboard():
       <div class="actions-row">
         <button class="btn btn-primary" onclick="runPipeline()">▶ Source Leads</button>
         <button class="btn btn-green" onclick="seedLeads()">🌱 Load Seed Leads</button>
-        <button class="btn" style="background:#e1306c;color:white" onclick="runInstagram()">📸 Scrape Instagram</button>
+        <button class="btn" style="background:#e1306c;color:white" onclick="runInstagram()">🔍 Find D2C Brands</button>
         <button class="btn btn-ghost" onclick="refreshAll()">↻ Refresh</button>
       </div>
       <div class="progress-wrap">
@@ -349,14 +349,14 @@ document.getElementById('chatInput').addEventListener('keydown', e => {
 
 // ── Pipeline Actions ──────────────────────────────────────────────────────────
 async function runInstagram() {
-  addLog('Starting Instagram D2C scraper...', 'info');
-  addLog('Searching hashtags: #madeinindia #d2cindia #indianbrand...', 'info');
+  addLog('Searching Google for Indian D2C brands...', 'info');
+  addLog('Queries: Shopify India, WooCommerce India, fashion brands...', 'info');
   updateProgress(5, 'Scraping Instagram hashtags...');
   document.getElementById('pipelineStatus').textContent = 'Running';
   try {
     const r = await fetch('/leads/instagram');
     const d = await r.json();
-    addLog('Instagram scraper started — takes 5-10 mins (respectful rate limiting)', 'info');
+    addLog('Scraper running — finds sites + extracts emails, phones, pain points', 'info');
     addLog('Watch logs for @username updates as brands are found...', 'info');
     pollLogs();
   } catch(e) {
