@@ -14,26 +14,27 @@ def get_conn():
 def init_db():
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute(
-        "CREATE TABLE IF NOT EXISTS leads ("
-        "id SERIAL PRIMARY KEY,"
-        "name TEXT,"
-        "website TEXT,"
-        "phone TEXT,"
-        "email TEXT,"
-        "city TEXT,"
-        "source TEXT,"
-        "linkedin_url TEXT DEFAULT '',"
-        "job_title TEXT DEFAULT '',"
-        "company TEXT DEFAULT '',"
-        "seo_score INTEGER,"
-        "pagespeed_score INTEGER,"
-        "pain_points TEXT DEFAULT '[]',"
-        "followers INTEGER DEFAULT 0,""stage TEXT DEFAULT 'new',"
-        "created_at TEXT,"
-        "updated_at TEXT"
-        ")"
-    )
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS leads (
+            id SERIAL PRIMARY KEY,
+            name TEXT DEFAULT '',
+            website TEXT DEFAULT '',
+            phone TEXT DEFAULT '',
+            email TEXT DEFAULT '',
+            city TEXT DEFAULT '',
+            source TEXT DEFAULT '',
+            linkedin_url TEXT DEFAULT '',
+            job_title TEXT DEFAULT '',
+            company TEXT DEFAULT '',
+            seo_score INTEGER,
+            pagespeed_score INTEGER,
+            pain_points TEXT DEFAULT '[]',
+            followers INTEGER DEFAULT 0,
+            stage TEXT DEFAULT 'new',
+            created_at TEXT DEFAULT '',
+            updated_at TEXT DEFAULT ''
+        )
+    """)
     conn.commit()
     cur.close()
     conn.close()
@@ -46,43 +47,62 @@ def save_leads(leads):
     conn = get_conn()
     cur = conn.cursor()
     saved = 0
+    errors = 0
     for lead in leads:
-        if isinstance(lead, dict):
-            d = lead
-        else:
-            d = lead.__dict__
+        d = lead if isinstance(lead, dict) else lead.__dict__
         try:
-            cur.execute(
+            # Serialize pain_points safely
+            raw_pain = d.get("pain_points") or []
+            if isinstance(raw_pain, str):
+                try:
+                    raw_pain = json.loads(raw_pain)
+                except Exception:
+                    raw_pain = []
+            pain_json = json.dumps([str(p) for p in raw_pain])
+
+            name        = str(d.get("name") or "")[:200]
+            website     = str(d.get("website") or "")[:500]
+            phone       = str(d.get("phone") or "")[:50]
+            email       = str(d.get("email") or "")[:200]
+            city        = str(d.get("city") or "")[:100]
+            source      = str(d.get("source") or "")[:50]
+            linkedin    = str(d.get("linkedin_url") or "")[:500]
+            job_title   = str(d.get("job_title") or "")[:200]
+            company     = str(d.get("company") or "")[:200]
+            seo_score   = d.get("seo_score") or None
+            page_score  = d.get("pagespeed_score") or None
+            followers   = int(d.get("followers") or 0)
+            stage       = str(d.get("stage") or "new")
+            created_at  = str(d.get("created_at") or datetime.utcnow().isoformat())
+            updated_at  = datetime.utcnow().isoformat()
+
+            sql = (
                 "INSERT INTO leads "
-                "(name,website,phone,email,city,source,linkedin_url,job_title,company,"
-                "seo_score,pagespeed_score,pain_points,stage,created_at,updated_at) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                (
-                    str(d.get("name") or ""),
-                    str(d.get("website") or ""),
-                    str(d.get("phone") or ""),
-                    str(d.get("email") or ""),
-                    str(d.get("city") or ""),
-                    str(d.get("source") or ""),
-                    str(d.get("linkedin_url") or ""),
-                    str(d.get("job_title") or ""),
-                    str(d.get("company") or ""),
-                    d.get("seo_score"),
-                    d.get("pagespeed_score"),
-                    json.dumps(d.get("pain_points") or []),
-                    int(d.get("followers") or 0),
-                    str(d.get("stage") or "new"),
-                    str(d.get("created_at") or datetime.utcnow().isoformat()),
-                    datetime.utcnow().isoformat()
-                )
+                "(name, website, phone, email, city, source, "
+                "linkedin_url, job_title, company, "
+                "seo_score, pagespeed_score, pain_points, "
+                "followers, stage, created_at, updated_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, "
+                "%s, %s, %s, "
+                "%s, %s, %s, "
+                "%s, %s, %s, %s)"
             )
+            args = (
+                name, website, phone, email, city, source,
+                linkedin, job_title, company,
+                seo_score, page_score, pain_json,
+                followers, stage, created_at, updated_at
+            )
+            print("[DB] Inserting: " + name + " | args count: " + str(len(args)))
+            cur.execute(sql, args)
             saved += 1
         except Exception as e:
-            print("[DB] Row error: " + str(e))
+            errors += 1
+            print("[DB] Row error full: " + repr(e))
     conn.commit()
     cur.close()
     conn.close()
-    print("[DB] Saved " + str(saved) + " leads")
+    print("[DB] Saved " + str(saved) + " | Errors " + str(errors))
     return saved
 
 
