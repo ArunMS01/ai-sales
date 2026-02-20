@@ -1,24 +1,66 @@
 import os
+import re
 import json
 import time
-import re
 import requests
 from datetime import datetime
 from dataclasses import dataclass, asdict
 from typing import Optional
+from bs4 import BeautifulSoup
 
-# ── Lead dataclass (compatible with existing DB schema) ───────────────────────
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-IN,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Referer": "https://www.indiamart.com/",
+    "Connection": "keep-alive",
+}
+
+# Target categories with IndiaMART search URLs
+CATEGORIES = {
+    "Clothing & Textiles": [
+        "https://www.indiamart.com/proddetail/clothing-manufacturers.html",
+        "https://www.indiamart.com/search.mp?ss=clothing+manufacturer+india",
+        "https://www.indiamart.com/search.mp?ss=textile+manufacturer+india",
+        "https://www.indiamart.com/search.mp?ss=garment+manufacturer+india",
+        "https://www.indiamart.com/search.mp?ss=fashion+clothing+supplier",
+    ],
+    "Electronics & Components": [
+        "https://www.indiamart.com/search.mp?ss=electronics+manufacturer+india",
+        "https://www.indiamart.com/search.mp?ss=electronic+components+supplier",
+        "https://www.indiamart.com/search.mp?ss=led+lights+manufacturer+india",
+        "https://www.indiamart.com/search.mp?ss=pcb+manufacturer+india",
+    ],
+    "Food & Beverages": [
+        "https://www.indiamart.com/search.mp?ss=food+products+manufacturer+india",
+        "https://www.indiamart.com/search.mp?ss=spices+manufacturer+india",
+        "https://www.indiamart.com/search.mp?ss=snacks+manufacturer+india",
+        "https://www.indiamart.com/search.mp?ss=beverages+manufacturer+india",
+    ],
+    "Furniture & Home Decor": [
+        "https://www.indiamart.com/search.mp?ss=furniture+manufacturer+india",
+        "https://www.indiamart.com/search.mp?ss=home+decor+manufacturer+india",
+        "https://www.indiamart.com/search.mp?ss=wooden+furniture+manufacturer",
+        "https://www.indiamart.com/search.mp?ss=modular+furniture+manufacturer",
+    ],
+}
+
+
 @dataclass
-class InstagramLead:
+class IndiaMartLead:
     name: str
     website: str
     phone: str
     email: str
     city: str
-    source: str
+    source: str = "indiamart"
     linkedin_url: str = ""
-    job_title: str = ""
+    job_title: str = "Owner / Proprietor"
     company: str = ""
+    category: str = ""
+    indiamart_url: str = ""
+    products: str = ""
     seo_score: Optional[int] = None
     pagespeed_score: Optional[int] = None
     pain_points: list = None
@@ -33,232 +75,275 @@ class InstagramLead:
             self.created_at = datetime.utcnow().isoformat()
 
 
-# ── Google Search Scraper ─────────────────────────────────────────────────────
-class GoogleSearchScraper:
-    """
-    Searches Google for Indian D2C / e-commerce brands using
-    public search queries. No API key needed.
-    Finds real businesses with websites that need digital marketing.
-    """
-
-    HEADERS = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml",
-        "Accept-Language": "en-US,en;q=0.9",
-    }
-
-    SEARCHES = [
-        # Find Shopify stores in India
-        'site:myshopify.com "india" fashion clothing',
-        'site:myshopify.com "india" beauty skincare',
-        'site:myshopify.com "india" jewelry accessories',
-        # Find WooCommerce stores in India
-        '"wp-content" "india" ecommerce clothing store',
-        # Find small D2C brands directly
-        '"buy now" "free shipping india" clothing brand',
-        '"shop now" "made in india" skincare brand',
-        '"cash on delivery" "india" fashion brand site:in',
-        # Find brands on specific platforms
-        'site:instamojo.com india fashion store',
-        'site:shiprocket.in india d2c brand',
-        # City-specific searches
-        '"mumbai" "online store" fashion brand contact email',
-        '"bangalore" "online store" skincare brand contact',
-        '"delhi" "online store" clothing brand email',
-        '"pune" "ecommerce" fashion brand founder email',
-        '"hyderabad" "online store" brand contact',
-    ]
-
-    def search(self, query, max_results=10):
-        """Search Google and extract website URLs from results."""
-        results = []
-        try:
-            url = "https://www.google.com/search?q=" + requests.utils.quote(query) + "&num=10"
-            resp = requests.get(url, headers=self.HEADERS, timeout=15)
-
-            if resp.status_code != 200:
-                print("[Google] Status " + str(resp.status_code) + " for: " + query[:50])
-                return []
-
-            html = resp.text
-
-            # Extract URLs from Google results
-            urls = re.findall(r'href="(https?://[^"&]+)"', html)
-            seen = set()
-            for u in urls:
-                # Skip Google's own URLs and junk
-                skip = ["google.", "youtube.", "facebook.", "instagram.", "twitter.",
-                        "amazon.", "flipkart.", "linkedin.", "wikipedia.", "quora.",
-                        "reddit.", "medium.", "github.", "indiamart.", "justdial."]
-                if any(s in u for s in skip):
-                    continue
-                domain = re.sub(r'https?://(www\.)?', '', u).split('/')[0]
-                if domain and domain not in seen and '.' in domain:
-                    seen.add(domain)
-                    results.append("https://" + domain)
-                if len(results) >= max_results:
-                    break
-
-            print("[Google] Query: " + query[:60] + " → " + str(len(results)) + " sites")
-            return results
-
-        except Exception as e:
-            print("[Google] Error: " + str(e))
-            return []
-
-
-class WebsiteAnalyzer:
-    """Fetch a website and extract contact info + business signals."""
-
-    HEADERS = {
-        "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1)",
-        "Accept": "text/html",
-    }
-
-    def analyze(self, url):
-        """Returns dict with name, email, phone, city, pain_points."""
-        result = {
-            "website": url,
-            "name": "",
-            "email": "",
-            "phone": "",
-            "city": "India",
-            "pain_points": [],
-            "company": "",
-        }
-        try:
-            resp = requests.get(url, headers=self.HEADERS, timeout=10)
-            if resp.status_code != 200:
-                return result
-            html = resp.text.lower()
-
-            # Extract email
-            emails = re.findall(r'[\w.+-]+@[\w-]+\.[a-zA-Z]{2,}', html)
-            # Filter out generic/spam emails
-            skip_emails = ["example", "test", "noreply", "no-reply", "support@shopify",
-                          "privacy", "legal", "abuse", "admin@wordpress"]
-            for e in emails:
-                if not any(s in e for s in skip_emails) and len(e) < 60:
-                    result["email"] = e
-                    break
-
-            # Extract phone
-            phones = re.findall(r'(?:\+91|0)?[6-9]\d{9}', html)
-            if phones:
-                result["phone"] = phones[0]
-
-            # Extract city
-            cities = ["mumbai", "delhi", "bangalore", "bengaluru", "hyderabad",
-                     "chennai", "kolkata", "pune", "ahmedabad", "surat",
-                     "jaipur", "noida", "gurugram", "gurgaon", "indore"]
-            for city in cities:
-                if city in html:
-                    result["city"] = city.title()
-                    break
-
-            # Extract business name from title tag
-            title = re.search(r'<title[^>]*>([^<]+)</title>', resp.text, re.IGNORECASE)
-            if title:
-                name = title.group(1).strip()
-                name = re.sub(r'\s*[\|–-].*$', '', name).strip()
-                result["name"]    = name[:60]
-                result["company"] = name[:60]
-
-            # Score pain points
-            pain = []
-            if "shopify" in html or "myshopify" in html:
-                pain.append("Shopify store needs SEO optimization")
-            if "woocommerce" in html:
-                pain.append("WooCommerce store needs SEO optimization")
-            if not re.search(r'google-analytics|gtag|ga\.js', html):
-                pain.append("no Google Analytics — flying blind on traffic")
-            if not re.search(r'pixel|fbq|facebook.*pixel', html):
-                pain.append("no Facebook Pixel — missing retargeting")
-            if not re.search(r'schema\.org|application/ld\+json', html):
-                pain.append("no schema markup — poor SEO structure")
-            if "cash on delivery" in html or "cod" in html:
-                pain.append("COD-heavy store — needs better digital ads to reduce returns")
-            pain.append("low organic traffic from Google")
-            result["pain_points"] = pain[:3]
-
-        except Exception as e:
-            print("[Analyzer] Error for " + url + ": " + str(e))
-        return result
-
-
-class InstagramLeadPipeline:
-    """
-    Renamed to keep compatibility with main.py imports.
-    Actually uses Google Search to find D2C brands.
-    """
+class IndiaMartScraper:
 
     def __init__(self):
-        self.google   = GoogleSearchScraper()
-        self.analyzer = WebsiteAnalyzer()
+        self.session = requests.Session()
+        self.session.headers.update(HEADERS)
 
-    def run(self, max_leads=100):
-        print("\n=== Google Search D2C Brand Finder ===")
-        all_urls = []
-        seen_domains = set()
-
-        # Step 1: Search Google
-        print("\n[Step 1] Searching Google for Indian D2C brands...")
-        for query in self.google.SEARCHES:
-            if len(all_urls) >= max_leads * 2:
-                break
-            urls = self.google.search(query, max_results=10)
-            for u in urls:
-                domain = re.sub(r'https?://(www\.)?', '', u).split('/')[0]
-                if domain not in seen_domains:
-                    seen_domains.add(domain)
-                    all_urls.append(u)
-            time.sleep(3)  # respectful delay between Google requests
-
-        print("\n[Step 2] Analyzing " + str(len(all_urls)) + " websites...")
+    def scrape_search_page(self, url, category):
+        """Scrape an IndiaMART search results page and extract seller listings."""
         leads = []
-        for url in all_urls:
-            if len(leads) >= max_leads:
-                break
-            info = self.analyzer.analyze(url)
+        try:
+            print("[IndiaMART] Fetching: " + url)
+            resp = self.session.get(url, timeout=20)
 
-            # Must have at least a name and some contact info
-            if not info["name"]:
-                time.sleep(0.5)
-                continue
+            if resp.status_code == 403:
+                print("[IndiaMART] 403 blocked on: " + url)
+                return []
+            if resp.status_code != 200:
+                print("[IndiaMART] Status " + str(resp.status_code) + " for: " + url)
+                return []
 
-            lead = InstagramLead(
-                name=info["name"],
-                website=url,
-                phone=info["phone"],
-                email=info["email"],
-                city=info["city"],
-                source="google_search",
-                job_title="Founder / Owner",
-                company=info["company"],
-                pain_points=info["pain_points"],
+            soup = BeautifulSoup(resp.text, "html.parser")
+
+            # IndiaMART listing cards — multiple possible selectors
+            cards = (
+                soup.find_all("div", class_="card-wrap") or
+                soup.find_all("div", class_=re.compile(r"listing|supplier|product-listing")) or
+                soup.find_all("div", attrs={"data-id": True}) or
+                soup.find_all("li", class_=re.compile(r"item|listing"))
             )
-            leads.append(lead)
-            print("[Found] " + info["name"] + " | " + url + " | " + info["city"])
-            time.sleep(1)
 
-        print("\n[Done] Found " + str(len(leads)) + " D2C brand leads")
+            print("[IndiaMART] Found " + str(len(cards)) + " cards on page")
 
-        # Save to DB
-        if leads:
-            try:
-                from database import init_db, save_leads
-                init_db()
-                saved = save_leads([asdict(l) for l in leads])
-                print("[DB] Saved " + str(saved) + " leads")
-            except Exception as e:
-                print("[DB] Error: " + str(e))
+            for card in cards:
+                lead = self._parse_card(card, category, url)
+                if lead:
+                    leads.append(lead)
+
+            # If no cards found, try extracting from JSON-LD or script tags
+            if not leads:
+                leads = self._extract_from_scripts(soup, category, url)
+
+        except Exception as e:
+            print("[IndiaMART] Exception: " + str(e))
 
         return leads
 
+    def _parse_card(self, card, category, page_url):
+        """Parse a single IndiaMART listing card."""
+        try:
+            # Company name
+            company = ""
+            for sel in ["h3", "h2", ".company-name", ".supplier-name", "[class*='comp']"]:
+                el = card.select_one(sel)
+                if el and el.get_text(strip=True):
+                    company = el.get_text(strip=True)[:80]
+                    break
+
+            if not company or len(company) < 2:
+                return None
+
+            # Phone number
+            phone = ""
+            phone_el = card.select_one("[class*='phone'], [class*='mobile'], [href^='tel:']")
+            if phone_el:
+                raw = phone_el.get("href", "") or phone_el.get_text()
+                phones = re.findall(r'[6-9]\d{9}', raw)
+                if phones:
+                    phone = phones[0]
+
+            # Also search raw text for phone
+            if not phone:
+                raw_text = card.get_text()
+                phones = re.findall(r'[6-9]\d{9}', raw_text)
+                if phones:
+                    phone = phones[0]
+
+            # City / Location
+            city = "India"
+            for sel in ["[class*='locat'], [class*='city'], [class*='address']"]:
+                el = card.select_one(sel)
+                if el:
+                    city = el.get_text(strip=True)[:40]
+                    break
+
+            # IndiaMART profile URL
+            indiamart_url = ""
+            link = card.find("a", href=re.compile(r"indiamart\.com"))
+            if link:
+                indiamart_url = link.get("href", "")
+
+            # Products
+            products = ""
+            prod_el = card.select_one("[class*='product'], [class*='item-name']")
+            if prod_el:
+                products = prod_el.get_text(strip=True)[:100]
+
+            # Build IndiaMART subdomain website
+            # Format: companyname.indiamart.com
+            website = ""
+            if indiamart_url:
+                match = re.search(r'https?://([^.]+)\.indiamart\.com', indiamart_url)
+                if match:
+                    website = "https://" + match.group(1) + ".indiamart.com"
+
+            pain = self._get_pain_points(category, website)
+
+            return IndiaMartLead(
+                name=company,
+                company=company,
+                website=website or indiamart_url,
+                phone=phone,
+                email="",
+                city=city,
+                category=category,
+                indiamart_url=indiamart_url,
+                products=products,
+                pain_points=pain,
+            )
+
+        except Exception as e:
+            return None
+
+    def _extract_from_scripts(self, soup, category, page_url):
+        """Extract structured data from JSON-LD or inline scripts."""
+        leads = []
+        try:
+            scripts = soup.find_all("script", type="application/ld+json")
+            for script in scripts:
+                try:
+                    data = json.loads(script.string or "{}")
+                    items = data if isinstance(data, list) else [data]
+                    for item in items:
+                        name = item.get("name", "")
+                        phone = item.get("telephone", "")
+                        city = (item.get("address") or {}).get("addressLocality", "India")
+                        url = item.get("url", "")
+                        if name and len(name) > 2:
+                            leads.append(IndiaMartLead(
+                                name=name, company=name,
+                                website=url, phone=phone,
+                                email="", city=city,
+                                category=category,
+                                indiamart_url=page_url,
+                                pain_points=self._get_pain_points(category, url),
+                            ))
+                except Exception:
+                    continue
+        except Exception as e:
+            print("[IndiaMART] Script extract error: " + str(e))
+        return leads
+
+    def _get_pain_points(self, category, website):
+        """Generate relevant pain points based on category."""
+        base = [
+            "only has IndiaMART microsite — no real website",
+            "invisible on Google Search — losing customers daily",
+            "no SEO presence — competitors ranking above them",
+        ]
+        category_specific = {
+            "Clothing & Textiles":       "missing B2B + B2C online store — leaving money on table",
+            "Electronics & Components":  "no product catalog website — buyers can't find specs online",
+            "Food & Beverages":          "no direct-to-consumer website — fully dependent on intermediaries",
+            "Furniture & Home Decor":    "no portfolio website — losing premium customers to competitors",
+        }
+        specific = category_specific.get(category, "no professional website")
+        return [specific] + base[:2]
+
+    def scrape_seller_profile(self, indiamart_url):
+        """Scrape individual seller profile page for email + more details."""
+        result = {"email": "", "phone": "", "name": ""}
+        if not indiamart_url:
+            return result
+        try:
+            resp = self.session.get(indiamart_url, timeout=15)
+            if resp.status_code != 200:
+                return result
+            soup = BeautifulSoup(resp.text, "html.parser")
+            text = soup.get_text()
+
+            # Email
+            emails = re.findall(r'[\w.+-]+@[\w-]+\.[a-zA-Z]{2,}', text)
+            skip = ["indiamart", "example", "noreply", "support@"]
+            for e in emails:
+                if not any(s in e for s in skip):
+                    result["email"] = e
+                    break
+
+            # Phone
+            phones = re.findall(r'[6-9]\d{9}', text)
+            if phones:
+                result["phone"] = phones[0]
+
+            # Owner name
+            for pattern in [r'Mr\.\s+([A-Z][a-z]+ [A-Z][a-z]+)', r'Ms\.\s+([A-Z][a-z]+ [A-Z][a-z]+)', r'Owner[:\s]+([A-Z][a-z]+ [A-Z][a-z]+)']:
+                match = re.search(pattern, resp.text)
+                if match:
+                    result["name"] = match.group(1)
+                    break
+
+        except Exception as e:
+            print("[IndiaMART] Profile error: " + str(e))
+        return result
+
+
+class IndiaMartLeadPipeline:
+
+    def __init__(self):
+        self.scraper = IndiaMartScraper()
+
+    def run(self, max_per_category=25):
+        all_leads = []
+        seen = set()
+
+        for category, urls in CATEGORIES.items():
+            print("\n=== Category: " + category + " ===")
+            cat_leads = []
+
+            for url in urls:
+                if len(cat_leads) >= max_per_category:
+                    break
+
+                page_leads = self.scraper.scrape_search_page(url, category)
+
+                for lead in page_leads:
+                    key = lead.company.lower().strip()
+                    if key and key not in seen:
+                        seen.add(key)
+                        cat_leads.append(lead)
+
+                print("[IndiaMART] " + category + ": " + str(len(cat_leads)) + " leads so far")
+                time.sleep(3)  # polite delay
+
+            # Enrich top leads with profile scraping (email + owner name)
+            print("[IndiaMART] Enriching " + str(min(10, len(cat_leads))) + " profiles for " + category)
+            for i, lead in enumerate(cat_leads[:10]):
+                if lead.indiamart_url and not lead.email:
+                    details = self.scraper.scrape_seller_profile(lead.indiamart_url)
+                    if details["email"]:
+                        lead.email = details["email"]
+                    if details["phone"] and not lead.phone:
+                        lead.phone = details["phone"]
+                    if details["name"]:
+                        lead.name = details["name"]
+                    cat_leads[i] = lead
+                time.sleep(1)
+
+            all_leads.extend(cat_leads[:max_per_category])
+            print("[IndiaMART] " + category + " done: " + str(len(cat_leads)) + " leads")
+
+        print("\n=== Total IndiaMART Leads: " + str(len(all_leads)) + " ===")
+
+        # Save to DB
+        try:
+            from database import init_db, save_leads
+            init_db()
+            saved = save_leads([asdict(l) for l in all_leads])
+            print("[DB] Saved " + str(saved) + " IndiaMART leads")
+        except Exception as e:
+            print("[DB] Error: " + str(e))
+            with open("indiamart_leads.json", "w") as f:
+                json.dump([asdict(l) for l in all_leads], f, indent=2)
+            print("[Fallback] Saved to indiamart_leads.json")
+
+        return all_leads
+
 
 if __name__ == "__main__":
-    pipeline = InstagramLeadPipeline()
-    leads = pipeline.run(max_leads=50)
-    print("\nTop 5:")
-    for l in leads[:5]:
-        print(l.name, "|", l.website, "|", l.email, "|", l.city)
+    pipeline = IndiaMartLeadPipeline()
+    leads = pipeline.run(max_per_category=25)
+    print("\nTop 10 leads:")
+    for l in leads[:10]:
+        print(l.company, "|", l.city, "|", l.phone, "|", l.email, "|", l.website)
