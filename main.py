@@ -128,10 +128,10 @@ async def dashboard():
     </div>
     <div class="panel-body">
       <div class="actions-row">
-        <button class="btn btn-primary" onclick="runPipeline()">▶ Source Leads</button>
-
-        <button class="btn" style="background:#e1306c;color:white" onclick="runInstagram()">🔍 Find D2C Brands</button>
         <button class="btn" style="background:#f97316;color:white" onclick="runIndiamart()">🏭 Scrape IndiaMART</button>
+        <button class="btn" style="background:#0ea5e9;color:white" onclick="enrichContacts()">🔍 Enrich Contacts</button>
+        <button class="btn" style="background:#7c3aed;color:white" onclick="runOrchestrator()">🤖 Run Full Pipeline</button>
+        <button class="btn" style="background:#16a34a;color:white" onclick="sendFollowups()">📨 Send Followups</button>
         <button class="btn btn-ghost" onclick="refreshAll()">↻ Refresh</button>
       </div>
       <div class="progress-wrap">
