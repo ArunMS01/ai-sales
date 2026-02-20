@@ -490,19 +490,21 @@ async def get_logs(from_: int = 0):
 
 # ── IndiaMART Scrape ─────────────────────────────────────────────────────────
 @app.get("/leads/indiamart")
-async def run_indiamart(background_tasks: BackgroundTasks, max_per_category: int = 25):
+async def run_indiamart(background_tasks: BackgroundTasks, max_per_category: int = 25, clear: bool = True):
     def _run():
         try:
             from indiamart_scraper import IndiaMartLeadPipeline
-            log("[IndiaMART] Starting scraper for 4 categories...")
-            log("[IndiaMART] Clothing, Electronics, Food, Furniture")
+            log("[IndiaMART] Starting scraper — Chemicals, Kanpur")
+            log("[IndiaMART] Will clear old leads and fetch fresh data...")
             pipeline = IndiaMartLeadPipeline()
-            leads = pipeline.run(max_per_category=max_per_category)
-            log("[IndiaMART] Done! Scraped " + str(len(leads)) + " seller leads")
+            leads = pipeline.run(max_per_category=max_per_category, clear_first=clear)
+            has_phone = sum(1 for l in leads if l.phone)
+            has_email = sum(1 for l in leads if l.email)
+            log("[IndiaMART] Done! " + str(len(leads)) + " leads | " + str(has_phone) + " with phone | " + str(has_email) + " with email")
         except Exception as e:
             log("[IndiaMART] Error: " + str(e))
     background_tasks.add_task(_run)
-    return {"status": "started", "message": "IndiaMART scraper running"}
+    return {"status": "started", "message": "IndiaMART scraper running — Chemicals Kanpur"}
 
 
 # ── Instagram Scrape ─────────────────────────────────────────────────────────
