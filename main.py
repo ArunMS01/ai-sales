@@ -132,6 +132,7 @@ async def dashboard():
         <button class="btn" style="background:#0ea5e9;color:white" onclick="enrichContacts()">🔍 Enrich Contacts</button>
         <button class="btn" style="background:#7c3aed;color:white" onclick="runOrchestrator()">🤖 Run Full Pipeline</button>
         <button class="btn" style="background:#16a34a;color:white" onclick="sendFollowups()">📨 Send Followups</button>
+        <button class="btn" style="background:#059669;color:white" onclick="generatePreviews()">🌐 Generate Websites</button>
         <button class="btn btn-ghost" onclick="refreshAll()">↻ Refresh</button>
       </div>
       <div class="progress-wrap">
@@ -190,7 +191,7 @@ async def dashboard():
         <table class="leads-table">
           <thead>
             <tr>
-              <th>Name</th><th>Company</th><th>Phone</th><th>Email</th><th>City</th><th>Website</th><th>Stage</th><th>Pain Points</th><th>Action</th>
+              <th>Name</th><th>Company</th><th>Phone</th><th>Email</th><th>City</th><th>Website</th><th>Preview</th><th>Stage</th><th>Pain Points</th><th>Action</th>
             </tr>
           </thead>
           <tbody id="leadsBody">
@@ -284,6 +285,7 @@ function renderLeads(leads) {
       '<td>' + email + '</td>' +
       '<td>' + city + '</td>' +
       '<td>' + siteHtml + '</td>' +
+      '<td>' + (l.linkedin_url ? '<a href="' + l.linkedin_url + '" target="_blank" style="color:#059669;font-weight:600;font-size:0.75rem">🌐 View Site</a>' : '<button onclick="genPreview(' + l.id + ')" class="btn btn-ghost" style="padding:3px 8px;font-size:0.7rem">Generate</button>') + '</td>' +
       '<td><span class="badge ' + badge + '">' + (l.stage||'new') + '</span></td>' +
       '<td>' + pain + '</td>' +
       '<td><button class="btn btn-ghost" style="padding:4px 10px;font-size:0.72rem" onclick="selectLead(' + JSON.stringify(JSON.stringify(l)) + ')">Chat</button></td>' +
@@ -387,6 +389,27 @@ async function runIndiamart() {
   } catch(e) {
     addLog('Error: ' + e.message, 'error');
   }
+}
+
+async function generatePreviews() {
+  addLog('Generating preview websites for all leads...', 'info');
+  addLog('Scraping IndiaMART data + building modern websites...', 'info');
+  updateProgress(5, 'Generating websites...');
+  try {
+    const r = await fetch('/leads/preview-all?limit=10');
+    addLog('Website generation started — check logs for progress', 'success');
+    pollLogs();
+    setTimeout(() => { loadLeads(); }, 15000);
+  } catch(e) { addLog('Error: ' + e.message, 'error'); }
+}
+
+async function genPreview(leadId) {
+  addLog('Generating preview for lead #' + leadId + '...', 'info');
+  try {
+    await fetch('/leads/' + leadId + '/preview', {method: 'POST'});
+    pollLogs();
+    setTimeout(() => { loadLeads(); }, 8000);
+  } catch(e) { addLog('Error: ' + e.message, 'error'); }
 }
 
 async function enrichContacts() {
@@ -545,6 +568,57 @@ async def run_indiamart(background_tasks: BackgroundTasks, max_per_category: int
             log("[IndiaMART] Error: " + str(e))
     background_tasks.add_task(_run)
     return {"status": "started", "message": "IndiaMART scraper running — Chemicals Kanpur"}
+
+
+# ── Website Preview ──────────────────────────────────────────────────────────
+@app.get("/preview/{slug}", response_class=HTMLResponse)
+async def preview_site(slug: str):
+    from website_generator import GENERATED_SITES
+    site = GENERATED_SITES.get(slug)
+    if not site:
+        return HTMLResponse("<h2 style='font-family:sans-serif;padding:40px'>Preview not generated yet. Click Generate Preview on the dashboard.</h2>", status_code=404)
+    return HTMLResponse(content=site["html"])
+
+
+@app.post("/leads/{lead_id}/preview")
+async def generate_preview(lead_id: int, background_tasks: BackgroundTasks):
+    def _run():
+        try:
+            from database import load_leads
+            from website_generator import generate_preview_for_lead
+            leads = load_leads(limit=500)
+            lead  = next((l for l in leads if l["id"] == lead_id), None)
+            if not lead:
+                log("[Preview] Lead " + str(lead_id) + " not found")
+                return
+            log("[Preview] Generating website for: " + lead.get("company", ""))
+            result = generate_preview_for_lead(lead)
+            log("[Preview] Done! " + result["preview_url"])
+        except Exception as e:
+            log("[Preview] Error: " + str(e))
+    background_tasks.add_task(_run)
+    return {"status": "started"}
+
+
+@app.get("/leads/preview-all")
+async def preview_all(background_tasks: BackgroundTasks, limit: int = 10):
+    def _run():
+        try:
+            from database import load_leads
+            from website_generator import generate_preview_for_lead
+            leads = load_leads(limit=limit)
+            log("[Preview] Generating " + str(len(leads)) + " preview websites...")
+            for lead in leads:
+                if not lead.get("company"):
+                    continue
+                result = generate_preview_for_lead(lead)
+                log("[Preview] " + lead.get("company", "") + " → " + result["preview_url"])
+                import time; time.sleep(1)
+            log("[Preview] All previews generated!")
+        except Exception as e:
+            log("[Preview] Error: " + str(e))
+    background_tasks.add_task(_run)
+    return {"status": "started", "message": "Generating preview websites for " + str(limit) + " leads"}
 
 
 # ── Contact Enrichment ───────────────────────────────────────────────────────
