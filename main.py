@@ -570,6 +570,43 @@ async def run_indiamart(background_tasks: BackgroundTasks, max_per_category: int
     return {"status": "started", "message": "IndiaMART scraper running — Chemicals Kanpur"}
 
 
+# ── Debug: Test IndiaMART access from Railway ────────────────────────────────
+@app.get("/debug/test-fetch")
+async def test_fetch(url: str = "https://www.indiamart.com"):
+    """Call this from browser to see what Railway can fetch from IndiaMART"""
+    import requests
+    results = {}
+    # Test 1: Basic IndiaMART homepage
+    for test_url in [url, "https://dir.indiamart.com/search.mp?ss=chemical+kanpur"]:
+        try:
+            r = requests.get(test_url, headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0",
+                "Accept": "text/html",
+                "Referer": "https://www.google.com/",
+            }, timeout=15, allow_redirects=True)
+            from bs4 import BeautifulSoup
+            soup  = BeautifulSoup(r.text, "html.parser")
+            text  = soup.get_text(" ", strip=True)
+            # Find product elements
+            import re
+            prods = []
+            for cls in ["product-name","prd-name","bsrp","item","proname","company-name","impproduct"]:
+                els = soup.find_all(class_=re.compile(cls, re.I))
+                for e in els[:5]:
+                    t = e.get_text(strip=True)[:60]
+                    if t: prods.append(t)
+            results[test_url] = {
+                "status": r.status_code,
+                "content_len": len(r.text),
+                "text_sample": text[:300],
+                "products_found": prods[:10],
+                "html_sample": r.text[:500],
+            }
+        except Exception as e:
+            results[test_url] = {"error": str(e)}
+    return results
+
+
 # ── Website Preview ──────────────────────────────────────────────────────────
 @app.get("/preview/{slug}", response_class=HTMLResponse)
 async def preview_site(slug: str):
