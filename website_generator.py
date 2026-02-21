@@ -1,812 +1,691 @@
+"""
+WEBSITE GENERATOR
+==================
+Scrapes IndiaMART seller data and generates a beautiful
+modern preview website hosted on Railway.
+
+Access at: /preview/{company-slug}
+"""
 import os
+import re
 import json
 import time
-import threading
+import requests
+from bs4 import BeautifulSoup
 from datetime import datetime
-from contextlib import asynccontextmanager
-from dotenv import load_dotenv
-from fastapi import FastAPI, Request, BackgroundTasks
-from fastapi.responses import JSONResponse, HTMLResponse
-from fastapi.middleware.cors import CORSMiddleware
 
-load_dotenv()
+SERPAPI_KEY  = os.getenv("SERPAPI_KEY", "")
+OPENAI_KEY   = os.getenv("OPENAI_API_KEY", "")
+BASE_URL     = os.getenv("WEBHOOK_BASE_URL", "https://web-production-6a55a.up.railway.app")
 
-# Global log buffer so UI can stream logs
-log_buffer = []
-pipeline_status = {"running": False, "progress": 0, "step": "idle", "total": 0}
-
-def log(msg):
-    timestamp = datetime.utcnow().strftime("%H:%M:%S")
-    entry = "[" + timestamp + "] " + str(msg)
-    print(entry)
-    log_buffer.append(entry)
-    if len(log_buffer) > 200:
-        log_buffer.pop(0)
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    log("AI Sales Agent started")
-    yield
-
-app = FastAPI(title="AI Sales Agent", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+# In-memory store of generated websites {slug: html}
+GENERATED_SITES = {}
 
 
-# ── Health ────────────────────────────────────────────────────────────────────
-@app.get("/health")
-async def health():
-    return {"status": "ok"}
+def slugify(text):
+    text = text.lower().strip()
+    text = re.sub(r'[^\w\s-]', '', text)
+    text = re.sub(r'[\s_-]+', '-', text)
+    return text[:40]
 
 
-# ── Main Dashboard ────────────────────────────────────────────────────────────
-@app.get("/", response_class=HTMLResponse)
-async def dashboard():
-    return HTMLResponse(content="""
-<!DOCTYPE html>
+class IndiaMArtScraper:
+    """Scrapes real data from IndiaMART seller profile."""
+
+    HEADERS = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "text/html",
+    }
+
+    def scrape(self, indiamart_url, company_name, city, products_hint=""):
+        data = {
+            "company":     company_name,
+            "city":        city,
+            "products":    [],
+            "description": "",
+            "phone":       "",
+            "email":       "",
+            "year":        "",
+            "logo_letter": company_name[0].upper() if company_name else "C",
+            "category":    "Chemical Manufacturer",
+        }
+
+        if not indiamart_url or "indiamart" not in indiamart_url:
+            data["products"] = self._default_products(products_hint)
+            return data
+
+        try:
+            resp = requests.get(indiamart_url, headers=self.HEADERS, timeout=12)
+            if resp.status_code != 200:
+                data["products"] = self._default_products(products_hint)
+                return data
+
+            soup = BeautifulSoup(resp.text, "html.parser")
+            text = soup.get_text(" ", strip=True)
+
+            # Products — find listed items
+            product_els = (
+                soup.find_all("div", class_=re.compile(r"product|item|catalog", re.I)) or
+                soup.find_all("li",  class_=re.compile(r"product|item", re.I))
+            )
+            for el in product_els[:12]:
+                name = el.get_text(strip=True)[:60]
+                if name and len(name) > 3 and name not in data["products"]:
+                    data["products"].append(name)
+
+            # Description / about
+            desc_el = soup.find(class_=re.compile(r"about|description|overview|profile", re.I))
+            if desc_el:
+                data["description"] = desc_el.get_text(" ", strip=True)[:300]
+
+            # Phone
+            phones = re.findall(r'[6-9]\d{9}', text)
+            skip   = ["9696969696", "8888888888"]
+            for p in phones:
+                if p not in skip:
+                    data["phone"] = p
+                    break
+
+            # Email
+            emails = re.findall(r'[\w.+-]+@[\w-]+\.[a-zA-Z]{2,}', text)
+            for e in emails:
+                if "indiamart" not in e and len(e) < 60:
+                    data["email"] = e
+                    break
+
+            # Year established
+            year = re.search(r'(?:established|est\.?|since|founded)[^\d]*(\d{4})', text, re.I)
+            if year:
+                data["year"] = year.group(1)
+
+        except Exception as ex:
+            print("[Scraper] Error: " + str(ex)[:80])
+
+        if not data["products"]:
+            data["products"] = self._default_products(products_hint)
+
+        return data
+
+    def _default_products(self, hint=""):
+        if "chemical" in hint.lower() or not hint:
+            return [
+                "Industrial Chemicals", "Agricultural Chemicals",
+                "Cleaning Chemicals", "Paint & Coating Chemicals",
+                "Water Treatment Chemicals", "Pharmaceutical Chemicals",
+                "Specialty Chemicals", "Laboratory Reagents"
+            ]
+        return ["Product 1", "Product 2", "Product 3", "Product 4"]
+
+
+class WebsiteGenerator:
+    """Generates beautiful modern HTML website from company data."""
+
+    def generate(self, data, lead_id=None):
+        company  = data.get("company", "Your Company")
+        city     = data.get("city", "India")
+        products = data.get("products", [])[:8]
+        desc     = data.get("description", "")
+        phone    = data.get("phone", "")
+        email    = data.get("email", "")
+        year     = data.get("year", "")
+        letter   = company[0].upper() if company else "C"
+
+        # Auto-generate description if missing
+        if not desc:
+            desc = (
+                company + " is a leading manufacturer and supplier based in " + city +
+                ", India. We specialize in high-quality " +
+                (products[0] if products else "industrial products") +
+                " and have been serving clients across India with excellence and reliability."
+            )
+
+        # Auto-generate testimonials
+        testimonials = [
+            {"name": "Rajesh Kumar",    "company": "Kumar Industries, Delhi",    "text": "Excellent quality products and timely delivery. Highly recommended!"},
+            {"name": "Priya Sharma",    "company": "Sharma Enterprises, Mumbai", "text": "We have been sourcing from them for 3 years. Consistent quality every time."},
+            {"name": "Amit Patel",      "company": "Patel Manufacturing, Surat", "text": "Best supplier in the region. Competitive pricing and great support."},
+        ]
+
+        products_html = ""
+        for i, p in enumerate(products):
+            icon = ["⚗️","🧪","🏭","🔬","💊","🌿","🧴","⚙️"][i % 8]
+            products_html += f"""
+            <div class="product-card">
+                <div class="product-icon">{icon}</div>
+                <h3>{p}</h3>
+                <p>Premium quality {p.lower()} manufactured to industry standards with full compliance and quality assurance.</p>
+                <a href="#contact" class="product-link">Get Quote →</a>
+            </div>"""
+
+        testimonials_html = ""
+        for t in testimonials:
+            testimonials_html += f"""
+            <div class="testimonial-card">
+                <div class="stars">★★★★★</div>
+                <p>"{t['text']}"</p>
+                <div class="testimonial-author">
+                    <div class="author-avatar">{t['name'][0]}</div>
+                    <div>
+                        <strong>{t['name']}</strong>
+                        <span>{t['company']}</span>
+                    </div>
+                </div>
+            </div>"""
+
+        wa_link   = ("https://wa.me/91" + phone) if phone else "#contact"
+        maps_link = "https://maps.google.com/?q=" + requests.utils.quote(company + " " + city)
+        year_text = ("Est. " + year) if year else "Trusted Manufacturer"
+        phone_display = phone if phone else "+91 XXXXX XXXXX"
+        email_display = email if email else "info@" + slugify(company) + ".com"
+
+        html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AI Sales Agent</title>
+<title>{company} | {city}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'Segoe UI', sans-serif; background: #0f1117; color: #e2e8f0; min-height: 100vh; }
-  .header { background: #1e2130; border-bottom: 1px solid #2d3148; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
-  .header h1 { color: #a78bfa; font-size: 1.2rem; }
-  .live-dot { width: 8px; height: 8px; background: #4ade80; border-radius: 50%; display: inline-block; margin-right: 6px; animation: pulse 1.5s infinite; }
-  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
-  .grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 12px; padding: 20px; }
-  .stat { background: #1e2130; border-radius: 12px; padding: 20px; border: 1px solid #2d3148; text-align: center; }
-  .stat .num { font-size: 2.2rem; font-weight: 700; color: #a78bfa; }
-  .stat .label { font-size: 0.78rem; color: #64748b; margin-top: 4px; }
-  .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 0 20px 20px; }
-  .panel { background: #1e2130; border-radius: 12px; border: 1px solid #2d3148; overflow: hidden; }
-  .panel-header { padding: 14px 18px; border-bottom: 1px solid #2d3148; display: flex; align-items: center; justify-content: space-between; }
-  .panel-header h2 { font-size: 0.9rem; color: #a78bfa; }
-  .panel-body { padding: 14px 18px; }
-  .btn { padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer; font-size: 0.82rem; font-weight: 600; transition: opacity 0.2s; }
-  .btn:hover { opacity: 0.85; }
-  .btn-primary { background: #6366f1; color: white; }
-  .btn-green { background: #16a34a; color: white; }
-  .btn-red { background: #dc2626; color: white; }
-  .btn-ghost { background: #2d3148; color: #a78bfa; }
-  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
-  .log-box { background: #0f1117; border-radius: 8px; padding: 12px; height: 240px; overflow-y: auto; font-family: monospace; font-size: 0.75rem; color: #4ade80; border: 1px solid #2d3148; }
-  .log-line { padding: 1px 0; border-bottom: 1px solid #0f1117; }
-  .log-line.error { color: #f87171; }
-  .log-line.success { color: #4ade80; }
-  .log-line.info { color: #94a3b8; }
-  .progress-wrap { margin: 10px 0; }
-  .progress-bg { background: #0f1117; border-radius: 99px; height: 8px; }
-  .progress-bar { height: 8px; border-radius: 99px; background: linear-gradient(90deg, #6366f1, #a78bfa); transition: width 0.5s; }
-  .step-label { font-size: 0.78rem; color: #6366f1; margin-top: 4px; }
-  .leads-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
-  .leads-table th { background: #0f1117; padding: 8px 10px; text-align: left; color: #6366f1; position: sticky; top: 0; }
-  .leads-table td { padding: 7px 10px; border-bottom: 1px solid #1a1f30; }
-  .leads-table tr:hover td { background: #1a1f30; }
-  .badge { padding: 2px 8px; border-radius: 20px; font-size: 0.68rem; font-weight: 600; }
-  .badge-new { background: #1e3a5f; color: #60a5fa; }
-  .badge-contacted { background: #1c1535; color: #c4b5fd; }
-  .badge-pitched { background: #1a2e00; color: #86efac; }
-  .badge-closed { background: #052e16; color: #4ade80; }
-  .table-wrap { max-height: 320px; overflow-y: auto; }
-  .chat-input { width: 100%; background: #0f1117; border: 1px solid #2d3148; border-radius: 8px; padding: 10px; color: #e2e8f0; font-size: 0.85rem; resize: none; }
-  .chat-input:focus { outline: none; border-color: #6366f1; }
-  .chat-box { background: #0f1117; border-radius: 8px; padding: 12px; height: 200px; overflow-y: auto; font-size: 0.82rem; margin-bottom: 10px; border: 1px solid #2d3148; }
-  .msg { margin-bottom: 10px; }
-  .msg .role { font-size: 0.7rem; color: #6366f1; margin-bottom: 2px; }
-  .msg .text { color: #e2e8f0; line-height: 1.5; }
-  .msg.ai .role { color: #a78bfa; }
-  select { background: #0f1117; border: 1px solid #2d3148; color: #e2e8f0; border-radius: 6px; padding: 6px 10px; font-size: 0.8rem; }
-  .full-panel { grid-column: 1 / -1; }
-  .actions-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
-  .tag { background: #1c1535; color: #c4b5fd; padding: 2px 8px; border-radius: 20px; font-size: 0.7rem; }
+:root {{
+    --navy:   #0a1628;
+    --blue:   #1a3a6e;
+    --accent: #c8972a;
+    --light:  #f8f6f1;
+    --white:  #ffffff;
+    --gray:   #64748b;
+    --border: #e2d9c8;
+}}
+* {{ margin: 0; padding: 0; box-sizing: border-box; }}
+html {{ scroll-behavior: smooth; }}
+body {{ font-family: 'DM Sans', sans-serif; background: var(--white); color: var(--navy); }}
+
+/* NAV */
+nav {{
+    position: fixed; top: 0; width: 100%; z-index: 100;
+    background: rgba(10,22,40,0.97); backdrop-filter: blur(12px);
+    padding: 0 5%; display: flex; align-items: center;
+    justify-content: space-between; height: 70px;
+    border-bottom: 1px solid rgba(200,151,42,0.2);
+}}
+.nav-logo {{ display: flex; align-items: center; gap: 12px; }}
+.logo-mark {{
+    width: 40px; height: 40px; background: var(--accent);
+    border-radius: 8px; display: flex; align-items: center;
+    justify-content: center; font-family: 'Playfair Display', serif;
+    font-size: 1.2rem; color: var(--navy); font-weight: 700;
+}}
+.nav-brand {{ color: var(--white); font-weight: 600; font-size: 1rem; }}
+.nav-links {{ display: flex; gap: 32px; list-style: none; }}
+.nav-links a {{ color: rgba(255,255,255,0.75); text-decoration: none; font-size: 0.9rem; font-weight: 500; transition: color 0.2s; }}
+.nav-links a:hover {{ color: var(--accent); }}
+.nav-cta {{
+    background: var(--accent); color: var(--navy); padding: 9px 22px;
+    border-radius: 6px; text-decoration: none; font-weight: 600;
+    font-size: 0.85rem; transition: opacity 0.2s;
+}}
+.nav-cta:hover {{ opacity: 0.85; }}
+
+/* HERO */
+.hero {{
+    min-height: 100vh;
+    background: linear-gradient(135deg, var(--navy) 0%, var(--blue) 60%, #0f2a5a 100%);
+    display: flex; align-items: center;
+    padding: 100px 5% 60px;
+    position: relative; overflow: hidden;
+}}
+.hero::before {{
+    content: ''; position: absolute; inset: 0;
+    background: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23c8972a' fill-opacity='0.04'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+}}
+.hero-content {{ position: relative; max-width: 640px; }}
+.hero-badge {{
+    display: inline-flex; align-items: center; gap: 8px;
+    background: rgba(200,151,42,0.15); border: 1px solid rgba(200,151,42,0.3);
+    color: var(--accent); padding: 6px 16px; border-radius: 20px;
+    font-size: 0.8rem; font-weight: 600; letter-spacing: 0.05em;
+    text-transform: uppercase; margin-bottom: 24px;
+}}
+.hero h1 {{
+    font-family: 'Playfair Display', serif;
+    font-size: clamp(2.2rem, 5vw, 3.6rem);
+    color: var(--white); line-height: 1.15; margin-bottom: 20px;
+}}
+.hero h1 span {{ color: var(--accent); }}
+.hero p {{
+    color: rgba(255,255,255,0.7); font-size: 1.05rem;
+    line-height: 1.7; margin-bottom: 36px; max-width: 520px;
+}}
+.hero-actions {{ display: flex; gap: 14px; flex-wrap: wrap; }}
+.btn-primary {{
+    background: var(--accent); color: var(--navy);
+    padding: 14px 32px; border-radius: 8px; text-decoration: none;
+    font-weight: 700; font-size: 0.95rem; transition: all 0.2s;
+    display: inline-flex; align-items: center; gap: 8px;
+}}
+.btn-primary:hover {{ transform: translateY(-2px); box-shadow: 0 8px 24px rgba(200,151,42,0.35); }}
+.btn-outline {{
+    border: 1.5px solid rgba(255,255,255,0.3); color: var(--white);
+    padding: 14px 32px; border-radius: 8px; text-decoration: none;
+    font-weight: 500; font-size: 0.95rem; transition: all 0.2s;
+    display: inline-flex; align-items: center; gap: 8px;
+}}
+.btn-outline:hover {{ border-color: var(--accent); color: var(--accent); }}
+.hero-stats {{
+    display: flex; gap: 40px; margin-top: 56px;
+    padding-top: 40px; border-top: 1px solid rgba(255,255,255,0.1);
+}}
+.stat-item {{ text-align: left; }}
+.stat-num {{ font-family: 'Playfair Display', serif; font-size: 2rem; color: var(--accent); font-weight: 700; }}
+.stat-label {{ color: rgba(255,255,255,0.5); font-size: 0.8rem; margin-top: 2px; }}
+
+/* SECTIONS */
+section {{ padding: 90px 5%; }}
+.section-tag {{
+    display: inline-block; background: rgba(200,151,42,0.1);
+    color: var(--accent); padding: 5px 14px; border-radius: 20px;
+    font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em;
+    text-transform: uppercase; margin-bottom: 14px;
+}}
+.section-title {{
+    font-family: 'Playfair Display', serif;
+    font-size: clamp(1.8rem, 3.5vw, 2.6rem);
+    color: var(--navy); margin-bottom: 14px; line-height: 1.2;
+}}
+.section-subtitle {{ color: var(--gray); font-size: 1rem; line-height: 1.7; max-width: 560px; margin-bottom: 50px; }}
+
+/* ABOUT */
+.about {{ background: var(--light); }}
+.about-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 60px; align-items: center; }}
+.about-features {{ display: grid; gap: 16px; margin-top: 30px; }}
+.feature-item {{
+    display: flex; align-items: flex-start; gap: 14px;
+    background: var(--white); padding: 18px 20px; border-radius: 10px;
+    border: 1px solid var(--border);
+}}
+.feature-icon {{
+    width: 40px; height: 40px; background: rgba(200,151,42,0.1);
+    border-radius: 8px; display: flex; align-items: center;
+    justify-content: center; font-size: 1.1rem; flex-shrink: 0;
+}}
+.feature-text h4 {{ font-weight: 600; font-size: 0.95rem; margin-bottom: 3px; }}
+.feature-text p {{ color: var(--gray); font-size: 0.85rem; }}
+.about-visual {{
+    background: linear-gradient(135deg, var(--navy), var(--blue));
+    border-radius: 16px; padding: 50px 40px; text-align: center; color: var(--white);
+}}
+.about-logo-big {{
+    width: 100px; height: 100px; background: var(--accent);
+    border-radius: 20px; display: flex; align-items: center;
+    justify-content: center; font-family: 'Playfair Display', serif;
+    font-size: 3rem; color: var(--navy); font-weight: 700;
+    margin: 0 auto 24px;
+}}
+.about-visual h3 {{ font-family: 'Playfair Display', serif; font-size: 1.6rem; margin-bottom: 8px; }}
+.about-visual p {{ color: rgba(255,255,255,0.65); font-size: 0.9rem; margin-bottom: 24px; }}
+.trust-badges {{ display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }}
+.trust-badge {{
+    background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15);
+    padding: 6px 14px; border-radius: 20px; font-size: 0.78rem; color: rgba(255,255,255,0.8);
+}}
+
+/* PRODUCTS */
+.products-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 24px; }}
+.product-card {{
+    border: 1px solid var(--border); border-radius: 12px; padding: 28px 24px;
+    transition: all 0.25s; background: var(--white);
+    position: relative; overflow: hidden;
+}}
+.product-card::before {{
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+    background: linear-gradient(90deg, var(--accent), transparent);
+    opacity: 0; transition: opacity 0.25s;
+}}
+.product-card:hover {{ transform: translateY(-4px); box-shadow: 0 16px 40px rgba(10,22,40,0.1); border-color: var(--accent); }}
+.product-card:hover::before {{ opacity: 1; }}
+.product-icon {{ font-size: 2rem; margin-bottom: 16px; }}
+.product-card h3 {{ font-size: 1rem; font-weight: 600; margin-bottom: 10px; color: var(--navy); }}
+.product-card p {{ color: var(--gray); font-size: 0.85rem; line-height: 1.6; margin-bottom: 16px; }}
+.product-link {{ color: var(--accent); font-weight: 600; font-size: 0.85rem; text-decoration: none; }}
+.product-link:hover {{ text-decoration: underline; }}
+
+/* TESTIMONIALS */
+.testimonials {{ background: var(--navy); }}
+.testimonials .section-title {{ color: var(--white); }}
+.testimonials .section-subtitle {{ color: rgba(255,255,255,0.55); }}
+.testimonials-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 24px; }}
+.testimonial-card {{
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px; padding: 28px 24px;
+}}
+.stars {{ color: var(--accent); font-size: 1rem; margin-bottom: 14px; letter-spacing: 2px; }}
+.testimonial-card p {{ color: rgba(255,255,255,0.75); font-size: 0.9rem; line-height: 1.7; margin-bottom: 20px; font-style: italic; }}
+.testimonial-author {{ display: flex; align-items: center; gap: 12px; }}
+.author-avatar {{
+    width: 40px; height: 40px; background: var(--accent); border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; color: var(--navy); font-size: 1rem;
+}}
+.testimonial-author strong {{ color: var(--white); font-size: 0.9rem; display: block; }}
+.testimonial-author span {{ color: rgba(255,255,255,0.45); font-size: 0.78rem; }}
+
+/* CONTACT */
+.contact-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 60px; align-items: start; }}
+.contact-info {{ display: grid; gap: 20px; }}
+.contact-item {{
+    display: flex; gap: 16px; align-items: flex-start;
+    padding: 20px; background: var(--light); border-radius: 10px;
+    border: 1px solid var(--border);
+}}
+.contact-icon {{
+    width: 44px; height: 44px; background: var(--navy); border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.1rem; flex-shrink: 0;
+}}
+.contact-item h4 {{ font-weight: 600; font-size: 0.9rem; margin-bottom: 4px; }}
+.contact-item p {{ color: var(--gray); font-size: 0.85rem; }}
+.contact-item a {{ color: var(--navy); text-decoration: none; font-weight: 500; }}
+.contact-form {{ background: var(--light); border-radius: 14px; padding: 36px; border: 1px solid var(--border); }}
+.contact-form h3 {{ font-family: 'Playfair Display', serif; font-size: 1.4rem; margin-bottom: 24px; }}
+.form-group {{ margin-bottom: 16px; }}
+.form-group label {{ display: block; font-size: 0.82rem; font-weight: 600; color: var(--navy); margin-bottom: 6px; }}
+.form-group input, .form-group textarea, .form-group select {{
+    width: 100%; padding: 11px 14px; border: 1.5px solid var(--border);
+    border-radius: 8px; font-family: 'DM Sans', sans-serif; font-size: 0.9rem;
+    color: var(--navy); background: var(--white); transition: border-color 0.2s;
+    outline: none;
+}}
+.form-group input:focus, .form-group textarea:focus {{ border-color: var(--accent); }}
+.form-group textarea {{ height: 110px; resize: none; }}
+.submit-btn {{
+    width: 100%; background: var(--navy); color: var(--white);
+    padding: 13px; border: none; border-radius: 8px; font-size: 0.95rem;
+    font-weight: 600; cursor: pointer; transition: all 0.2s;
+    font-family: 'DM Sans', sans-serif;
+}}
+.submit-btn:hover {{ background: var(--accent); color: var(--navy); }}
+
+/* MAP */
+.map-container {{
+    border-radius: 12px; overflow: hidden; border: 1px solid var(--border);
+    height: 200px; margin-top: 20px;
+}}
+.map-container iframe {{ width: 100%; height: 100%; border: none; }}
+
+/* WHATSAPP */
+.wa-float {{
+    position: fixed; bottom: 28px; right: 28px; z-index: 999;
+    background: #25d366; color: white; width: 58px; height: 58px;
+    border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    font-size: 1.6rem; text-decoration: none; box-shadow: 0 6px 24px rgba(37,211,102,0.4);
+    transition: all 0.2s;
+}}
+.wa-float:hover {{ transform: scale(1.1); }}
+.wa-label {{
+    position: fixed; bottom: 42px; right: 96px; z-index: 998;
+    background: var(--navy); color: var(--white); padding: 8px 16px;
+    border-radius: 8px; font-size: 0.82rem; font-weight: 500;
+    white-space: nowrap; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}}
+
+/* FOOTER */
+footer {{
+    background: var(--navy); color: rgba(255,255,255,0.5);
+    text-align: center; padding: 30px 5%; font-size: 0.82rem;
+    border-top: 1px solid rgba(255,255,255,0.08);
+}}
+footer strong {{ color: var(--white); }}
+
+/* PREVIEW BANNER */
+.preview-banner {{
+    position: fixed; top: 0; left: 0; right: 0; z-index: 9999;
+    background: linear-gradient(90deg, #7c3aed, #6d28d9);
+    color: white; text-align: center; padding: 10px 20px;
+    font-size: 0.82rem; font-weight: 500;
+}}
+.preview-banner a {{ color: #fbbf24; text-decoration: none; font-weight: 700; }}
+body {{ padding-top: 40px; }}
+
+@media (max-width: 768px) {{
+    .about-grid, .contact-grid {{ grid-template-columns: 1fr; }}
+    .hero-stats {{ gap: 24px; flex-wrap: wrap; }}
+    .nav-links {{ display: none; }}
+}}
 </style>
 </head>
 <body>
 
-<div class="header">
-  <h1>🤖 AI Sales Agent <span id="statusDot"><span class="live-dot"></span>Live</span></h1>
-  <div style="font-size:0.8rem;color:#64748b" id="clock"></div>
+<!-- Preview Banner -->
+<div class="preview-banner">
+    🎨 This is a <strong>free sample website</strong> created for {company} by DigitalBoost Agency.
+    <a href="#contact">Get your real website →</a>
 </div>
 
-<!-- Stats -->
-<div class="grid">
-  <div class="stat"><div class="num" id="statTotal">—</div><div class="label">Total Leads</div></div>
-  <div class="stat"><div class="num" id="statNew">—</div><div class="label">New</div></div>
-  <div class="stat"><div class="num" id="statContacted">—</div><div class="label">Contacted</div></div>
-  <div class="stat"><div class="num" id="statClosed" style="color:#4ade80">—</div><div class="label">Closed 🎉</div></div>
-</div>
+<!-- Nav -->
+<nav>
+    <div class="nav-logo">
+        <div class="logo-mark">{letter}</div>
+        <span class="nav-brand">{company}</span>
+    </div>
+    <ul class="nav-links">
+        <li><a href="#about">About</a></li>
+        <li><a href="#products">Products</a></li>
+        <li><a href="#testimonials">Reviews</a></li>
+        <li><a href="#contact">Contact</a></li>
+    </ul>
+    <a href="{wa_link}" class="nav-cta">📱 WhatsApp Us</a>
+</nav>
 
-<div class="panels">
+<!-- Hero -->
+<section class="hero">
+    <div class="hero-content">
+        <div class="hero-badge">⚡ {year_text} · {city}, India</div>
+        <h1>Leading <span>{data.get('category', 'Manufacturer')}</span><br>in {city}</h1>
+        <p>{desc[:180]}...</p>
+        <div class="hero-actions">
+            <a href="#products" class="btn-primary">🏭 View Products</a>
+            <a href="{wa_link}" class="btn-outline">💬 WhatsApp Now</a>
+        </div>
+        <div class="hero-stats">
+            <div class="stat-item">
+                <div class="stat-num">500+</div>
+                <div class="stat-label">Happy Clients</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-num">{len(products)}+</div>
+                <div class="stat-label">Products</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-num">PAN</div>
+                <div class="stat-label">India Delivery</div>
+            </div>
+        </div>
+    </div>
+</section>
 
-  <!-- Pipeline Control -->
-  <div class="panel">
-    <div class="panel-header">
-      <h2>⚙️ Pipeline Control</h2>
-      <span id="pipelineStatus" style="font-size:0.75rem;color:#64748b">Idle</span>
+<!-- About -->
+<section class="about" id="about">
+    <div class="about-grid">
+        <div>
+            <div class="section-tag">About Us</div>
+            <h2 class="section-title">Trusted Quality.<br>Since Day One.</h2>
+            <p class="section-subtitle">{desc}</p>
+            <div class="about-features">
+                <div class="feature-item">
+                    <div class="feature-icon">✅</div>
+                    <div class="feature-text"><h4>ISO Certified Quality</h4><p>All products manufactured under strict quality control</p></div>
+                </div>
+                <div class="feature-item">
+                    <div class="feature-icon">🚚</div>
+                    <div class="feature-text"><h4>PAN India Delivery</h4><p>Fast and reliable shipping across all states</p></div>
+                </div>
+                <div class="feature-item">
+                    <div class="feature-icon">🤝</div>
+                    <div class="feature-text"><h4>Bulk Order Discounts</h4><p>Special pricing for large volume orders</p></div>
+                </div>
+            </div>
+        </div>
+        <div class="about-visual">
+            <div class="about-logo-big">{letter}</div>
+            <h3>{company}</h3>
+            <p>{city}, India · {year_text}</p>
+            <div class="trust-badges">
+                <span class="trust-badge">✓ GST Verified</span>
+                <span class="trust-badge">✓ ISO Compliant</span>
+                <span class="trust-badge">✓ PAN India</span>
+            </div>
+        </div>
     </div>
-    <div class="panel-body">
-      <div class="actions-row">
-        <button class="btn" style="background:#f97316;color:white" onclick="runIndiamart()">🏭 Scrape IndiaMART</button>
-        <button class="btn" style="background:#0ea5e9;color:white" onclick="enrichContacts()">🔍 Enrich Contacts</button>
-        <button class="btn" style="background:#7c3aed;color:white" onclick="runOrchestrator()">🤖 Run Full Pipeline</button>
-        <button class="btn" style="background:#16a34a;color:white" onclick="sendFollowups()">📨 Send Followups</button>
-        <button class="btn" style="background:#059669;color:white" onclick="generatePreviews()">🌐 Generate Websites</button>
-        <button class="btn btn-ghost" onclick="refreshAll()">↻ Refresh</button>
-      </div>
-      <div class="progress-wrap">
-        <div class="progress-bg"><div class="progress-bar" id="progressBar" style="width:0%"></div></div>
-        <div class="step-label" id="stepLabel">Ready</div>
-      </div>
-      <div class="log-box" id="logBox">
-        <div class="log-line info">Waiting for activity...</div>
-      </div>
-    </div>
-  </div>
+</section>
 
-  <!-- AI Brain Tester -->
-  <div class="panel">
-    <div class="panel-header">
-      <h2>🧠 Test AI Brain</h2>
-      <select id="channelSelect">
-        <option value="call">📞 Call</option>
-        <option value="whatsapp">💬 WhatsApp</option>
-        <option value="email">📧 Email</option>
-      </select>
-    </div>
-    <div class="panel-body">
-      <div style="margin-bottom:8px;display:flex;gap:8px;align-items:center">
-        <select id="leadSelect" style="flex:1" onchange="updateSelectedLead()">
-          <option value="">— Select a lead —</option>
-        </select>
-        <button class="btn btn-ghost" onclick="loadLeadsIntoSelect()">↻</button>
-      </div>
-      <div id="leadTags" style="margin-bottom:8px;display:flex;gap:4px;flex-wrap:wrap"></div>
-      <div class="chat-box" id="chatBox"></div>
-      <div style="display:flex;gap:8px">
-        <textarea class="chat-input" id="chatInput" rows="2" placeholder="Type a message as the prospect..."></textarea>
-        <button class="btn btn-primary" onclick="sendChat()" style="align-self:flex-end">Send</button>
-      </div>
-    </div>
-  </div>
+<!-- Products -->
+<section id="products">
+    <div class="section-tag">Our Products</div>
+    <h2 class="section-title">What We Manufacture</h2>
+    <p class="section-subtitle">High-quality products built to industry standards, available for bulk orders across India.</p>
+    <div class="products-grid">{products_html}</div>
+</section>
 
-  <!-- Leads Table -->
-  <div class="panel full-panel">
-    <div class="panel-header">
-      <h2>📋 Leads Pipeline</h2>
-      <div style="display:flex;gap:8px;align-items:center">
-        <select id="stageFilter" onchange="filterLeads()">
-          <option value="">All Stages</option>
-          <option value="new">New</option>
-          <option value="contacted">Contacted</option>
-          <option value="pitched">Pitched</option>
-          <option value="closed">Closed</option>
-        </select>
-        <span style="font-size:0.75rem;color:#64748b" id="leadsCount"></span>
-      </div>
-    </div>
-    <div class="panel-body" style="padding:0">
-      <div class="table-wrap">
-        <table class="leads-table">
-          <thead>
-            <tr>
-              <th>Name</th><th>Company</th><th>Phone</th><th>Email</th><th>City</th><th>Website</th><th>Preview</th><th>Stage</th><th>Pain Points</th><th>Action</th>
-            </tr>
-          </thead>
-          <tbody id="leadsBody">
-            <tr><td colspan="8" style="text-align:center;color:#64748b;padding:30px">
-              Click "Load Seed Leads" or "Source Leads" to get started
-            </td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </div>
+<!-- Testimonials -->
+<section class="testimonials" id="testimonials">
+    <div class="section-tag">Client Reviews</div>
+    <h2 class="section-title">What Our Clients Say</h2>
+    <p class="section-subtitle">Trusted by 500+ businesses across India for consistent quality and service.</p>
+    <div class="testimonials-grid">{testimonials_html}</div>
+</section>
 
-</div>
+<!-- Contact -->
+<section id="contact">
+    <div class="section-tag">Get In Touch</div>
+    <h2 class="section-title">Request a Quote</h2>
+    <p class="section-subtitle">Fill in the form below or WhatsApp us directly for fastest response.</p>
+    <div class="contact-grid">
+        <div class="contact-info">
+            <div class="contact-item">
+                <div class="contact-icon">📍</div>
+                <div><h4>Location</h4><p>{city}, India</p></div>
+            </div>
+            <div class="contact-item">
+                <div class="contact-icon">📱</div>
+                <div><h4>Phone / WhatsApp</h4><p><a href="{wa_link}">{phone_display}</a></p></div>
+            </div>
+            <div class="contact-item">
+                <div class="contact-icon">📧</div>
+                <div><h4>Email</h4><p><a href="mailto:{email_display}">{email_display}</a></p></div>
+            </div>
+            <div class="map-container">
+                <iframe src="https://maps.google.com/maps?q={requests.utils.quote(company + ' ' + city)}&output=embed" allowfullscreen loading="lazy"></iframe>
+            </div>
+        </div>
+        <div class="contact-form">
+            <h3>Send an Enquiry</h3>
+            <div class="form-group">
+                <label>Your Name</label>
+                <input type="text" placeholder="Rajesh Kumar">
+            </div>
+            <div class="form-group">
+                <label>Phone / WhatsApp</label>
+                <input type="tel" placeholder="+91 98765 43210">
+            </div>
+            <div class="form-group">
+                <label>Product Required</label>
+                <select>
+                    <option>Select a product...</option>
+                    {"".join(f'<option>{p}</option>' for p in products)}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Message</label>
+                <textarea placeholder="Please share quantity, specifications, delivery location..."></textarea>
+            </div>
+            <button class="submit-btn" onclick="alert('Thank you! We will contact you within 24 hours.')">Send Enquiry →</button>
+        </div>
+    </div>
+</section>
+
+<!-- WhatsApp Float -->
+<a href="{wa_link}" class="wa-float" target="_blank">💬</a>
+<div class="wa-label">Chat on WhatsApp</div>
+
+<!-- Footer -->
+<footer>
+    <p>© 2024 <strong>{company}</strong> · {city}, India · All rights reserved</p>
+    <p style="margin-top:8px;font-size:0.75rem">Website designed by <strong>DigitalBoost Agency</strong> · Want this for your business? <a href="#contact" style="color:#c8972a">Contact us</a></p>
+</footer>
 
 <script>
-let allLeads = [];
-let selectedLead = null;
-let chatHistory = [];
-let logPointer = 0;
-
-// ── Clock ─────────────────────────────────────────────────────────────────────
-function updateClock() {
-  document.getElementById('clock').textContent = new Date().toUTCString().slice(0,25);
-}
-setInterval(updateClock, 1000);
-updateClock();
-
-// ── Stats ─────────────────────────────────────────────────────────────────────
-async function loadStats() {
-  try {
-    const r = await fetch('/api/stats');
-    const d = await r.json();
-    document.getElementById('statTotal').textContent     = d.total || 0;
-    document.getElementById('statNew').textContent       = d.new || 0;
-    document.getElementById('statContacted').textContent = d.contacted || 0;
-    document.getElementById('statClosed').textContent    = d.closed || 0;
-  } catch(e) {}
-}
-
-// ── Leads ─────────────────────────────────────────────────────────────────────
-async function loadLeads(stage='') {
-  try {
-    const url = '/leads/list' + (stage ? '?stage=' + stage : '');
-    const r   = await fetch(url);
-    const d   = await r.json();
-    allLeads  = d.leads || [];
-    renderLeads(allLeads);
-    loadLeadsIntoSelect();
-    document.getElementById('leadsCount').textContent = allLeads.length + ' leads';
-  } catch(e) {}
-}
-
-function renderLeads(leads) {
-  const body = document.getElementById('leadsBody');
-  if (!leads.length) {
-    body.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#64748b;padding:30px">No leads yet — click Load Seed Leads or Scrape IndiaMART</td></tr>';
-    return;
-  }
-  body.innerHTML = leads.map(l => {
-    const badge = 'badge-' + (l.stage || 'new');
-    const pain  = (l.pain_points || []).slice(0,2).map(p => '<span class="tag">' + p + '</span>').join(' ');
-
-    // Phone — clickable WhatsApp link
-    const rawPhone = (l.phone || '').toString().replace(/[^0-9]/g, '').slice(-10);
-    const phone = rawPhone
-      ? '<a href="https://wa.me/91' + rawPhone + '" target="_blank" style="color:#25d366;font-weight:600">📱 ' + rawPhone + '</a>'
-      : '<span style="color:#4b5563">—</span>';
-
-    // Email — mailto link
-    const email = l.email
-      ? '<a href="mailto:' + l.email + '" style="color:#a78bfa;font-size:0.75rem">' + l.email + '</a>'
-      : '<span style="color:#4b5563">—</span>';
-
-    // City — clean text only
-    const city = (l.city || 'India').split(',')[0].trim();
-
-    // Website — colour coded
-    const site = l.website || '';
-    const siteLabel = site.includes('wa.me') ? '💬 WhatsApp'
-                    : site.replace('https://','').replace('http://','').split('/')[0] || '—';
-    const siteColor = site.includes('wa.me') ? '#25d366'
-                    : site.includes('indiamart') ? '#64748b' : '#a78bfa';
-    const siteHtml = site
-      ? '<a href="' + site + '" target="_blank" style="color:' + siteColor + ';font-size:0.75rem">' + siteLabel + '</a>'
-      : '<span style="color:#4b5563">—</span>';
-
-    return '<tr>' +
-      '<td>' + (l.name || '—') + '</td>' +
-      '<td>' + (l.company || '—') + '</td>' +
-      '<td>' + phone + '</td>' +
-      '<td>' + email + '</td>' +
-      '<td>' + city + '</td>' +
-      '<td>' + siteHtml + '</td>' +
-      '<td>' + (l.linkedin_url ? '<a href="' + l.linkedin_url + '" target="_blank" style="color:#059669;font-weight:600;font-size:0.75rem">🌐 View Site</a>' : '<button onclick="genPreview(' + l.id + ')" class="btn btn-ghost" style="padding:3px 8px;font-size:0.7rem">Generate</button>') + '</td>' +
-      '<td><span class="badge ' + badge + '">' + (l.stage||'new') + '</span></td>' +
-      '<td>' + pain + '</td>' +
-      '<td><button class="btn btn-ghost" style="padding:4px 10px;font-size:0.72rem" onclick="selectLead(' + JSON.stringify(JSON.stringify(l)) + ')">Chat</button></td>' +
-      '</tr>';
-  }).join('');
-}
-
-function filterLeads() {
-  const stage = document.getElementById('stageFilter').value;
-  loadLeads(stage);
-}
-
-// ── Lead Select for Chat ──────────────────────────────────────────────────────
-function loadLeadsIntoSelect() {
-  const sel = document.getElementById('leadSelect');
-  const cur = sel.value;
-  sel.innerHTML = '<option value="">— Select a lead —</option>' +
-    allLeads.map(l => '<option value="' + l.id + '">' + l.name + ' — ' + l.company + '</option>').join('');
-  if (cur) sel.value = cur;
-}
-
-function updateSelectedLead() {
-  const id = document.getElementById('leadSelect').value;
-  selectedLead = allLeads.find(l => String(l.id) === String(id)) || null;
-  chatHistory  = [];
-  document.getElementById('chatBox').innerHTML = '';
-  const tags = document.getElementById('leadTags');
-  if (selectedLead) {
-    const pain = (selectedLead.pain_points || []).map(p => '<span class="tag">' + p + '</span>').join(' ');
-    tags.innerHTML = pain || '<span class="tag">no pain points tagged</span>';
-  } else {
-    tags.innerHTML = '';
-  }
-}
-
-function selectLead(jsonStr) {
-  const lead = JSON.parse(jsonStr);
-  selectedLead = lead;
-  chatHistory  = [];
-  document.getElementById('chatBox').innerHTML = '';
-  const opts = document.getElementById('leadSelect').options;
-  for (let i = 0; i < opts.length; i++) {
-    if (opts[i].text.includes(lead.name)) { opts[i].selected = true; break; }
-  }
-  const pain = (lead.pain_points || []).map(p => '<span class="tag">' + p + '</span>').join(' ');
-  document.getElementById('leadTags').innerHTML = pain;
-  document.getElementById('chatInput').focus();
-}
-
-// ── AI Chat ───────────────────────────────────────────────────────────────────
-async function sendChat() {
-  const input   = document.getElementById('chatInput');
-  const message = input.value.trim();
-  if (!message) return;
-  if (!selectedLead) { alert('Select a lead first!'); return; }
-
-  const channel = document.getElementById('channelSelect').value;
-  input.value   = '';
-
-  appendChat('prospect', message);
-
-  try {
-    const r = await fetch('/agent/chat', {
-      method:  'POST',
-      headers: {'Content-Type': 'application/json'},
-      body:    JSON.stringify({ lead: selectedLead, message, channel })
-    });
-    const d = await r.json();
-    appendChat('ai', d.response || d.error || 'No response');
-    if (d.stage) selectedLead.stage = d.stage;
-  } catch(e) {
-    appendChat('ai', 'Error: ' + e.message);
-  }
-}
-
-function appendChat(role, text) {
-  const box  = document.getElementById('chatBox');
-  const div  = document.createElement('div');
-  div.className = 'msg ' + (role === 'ai' ? 'ai' : '');
-  div.innerHTML = '<div class="role">' + (role === 'ai' ? '🤖 Aryan (AI)' : '👤 Prospect') + '</div>' +
-                  '<div class="text">' + text + '</div>';
-  box.appendChild(div);
-  box.scrollTop = box.scrollHeight;
-}
-
-document.getElementById('chatInput').addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
-});
-
-// ── Pipeline Actions ──────────────────────────────────────────────────────────
-async function runIndiamart() {
-  addLog('Starting IndiaMART scraper...', 'info');
-  addLog('Categories: Clothing, Electronics, Food, Furniture', 'info');
-  updateProgress(5, 'Scraping IndiaMART sellers...');
-  document.getElementById('pipelineStatus').textContent = 'Running';
-  try {
-    const r = await fetch('/leads/indiamart');
-    const d = await r.json();
-    addLog('IndiaMART scraper started — scraping seller profiles...', 'info');
-    pollLogs();
-  } catch(e) {
-    addLog('Error: ' + e.message, 'error');
-  }
-}
-
-async function generatePreviews() {
-  addLog('Generating preview websites for all leads...', 'info');
-  addLog('Scraping IndiaMART data + building modern websites...', 'info');
-  updateProgress(5, 'Generating websites...');
-  try {
-    const r = await fetch('/leads/preview-all?limit=10');
-    addLog('Website generation started — check logs for progress', 'success');
-    pollLogs();
-    setTimeout(() => { loadLeads(); }, 15000);
-  } catch(e) { addLog('Error: ' + e.message, 'error'); }
-}
-
-async function genPreview(leadId) {
-  addLog('Generating preview for lead #' + leadId + '...', 'info');
-  try {
-    await fetch('/leads/' + leadId + '/preview', {method: 'POST'});
-    pollLogs();
-    setTimeout(() => { loadLeads(); }, 8000);
-  } catch(e) { addLog('Error: ' + e.message, 'error'); }
-}
-
-async function enrichContacts() {
-  addLog('Starting contact enrichment...', 'info');
-  addLog('Searching JustDial + Google for real phones and emails...', 'info');
-  updateProgress(10, 'Enriching contacts...');
-  try {
-    await fetch('/leads/enrich?limit=30');
-    addLog('Enrichment running — check logs for updates', 'success');
-    pollLogs();
-  } catch(e) { addLog('Error: ' + e.message, 'error'); }
-}
-
-async function runOrchestrator() {
-  addLog('Starting full pipeline orchestrator...', 'info');
-  addLog('Steps: Enrich contacts → Send WhatsApp → Track replies', 'info');
-  updateProgress(5, 'Running orchestrator...');
-  document.getElementById('pipelineStatus').textContent = 'Running';
-  try {
-    await fetch('/orchestrator/run?enrich=true&outreach=true');
-    addLog('Orchestrator started — watch logs for progress', 'success');
-    pollLogs();
-  } catch(e) { addLog('Error: ' + e.message, 'error'); }
-}
-
-async function sendFollowups() {
-  addLog('Sending follow-ups to contacted leads...', 'info');
-  try {
-    await fetch('/orchestrator/followups');
-    addLog('Follow-ups queued — check logs', 'success');
-    pollLogs();
-  } catch(e) { addLog('Error: ' + e.message, 'error'); }
-}
-
-async function runInstagram() {
-  addLog('Searching Google for Indian D2C brands...', 'info');
-  addLog('Queries: Shopify India, WooCommerce India, fashion brands...', 'info');
-  updateProgress(5, 'Scraping Instagram hashtags...');
-  document.getElementById('pipelineStatus').textContent = 'Running';
-  try {
-    const r = await fetch('/leads/instagram');
-    const d = await r.json();
-    addLog('Scraper running — finds sites + extracts emails, phones, pain points', 'info');
-    addLog('Watch logs for @username updates as brands are found...', 'info');
-    pollLogs();
-  } catch(e) {
-    addLog('Error: ' + e.message, 'error');
-  }
-}
-
-
-
-async function runPipeline() {
-  addLog('Starting full pipeline...', 'info');
-  updateProgress(5, 'Initializing...');
-  document.getElementById('pipelineStatus').textContent = 'Running';
-  try {
-    await fetch('/leads/run');
-    pollLogs();
-  } catch(e) {
-    addLog('Error: ' + e.message, 'error');
-  }
-}
-
-async function pollLogs() {
-  try {
-    const r = await fetch('/api/logs?from=' + logPointer);
-    const d = await r.json();
-    for (const line of d.logs) {
-      logPointer++;
-      if (line.includes('Error') || line.includes('error')) addLog(line, 'error');
-      else if (line.includes('Saved') || line.includes('Synced') || line.includes('Done')) addLog(line, 'success');
-      else addLog(line, 'info');
-
-      if (line.includes('STEP 1')) updateProgress(20, 'Step 1: Apollo Search...');
-      if (line.includes('STEP 2')) updateProgress(40, 'Step 2: Loading stores...');
-      if (line.includes('STEP 3')) updateProgress(60, 'Step 3: Seed leads...');
-      if (line.includes('STEP 4')) updateProgress(75, 'Step 4: Tagging pain points...');
-      if (line.includes('STEP 5')) updateProgress(90, 'Step 5: HubSpot sync...');
-      if (line.includes('Synced')) { updateProgress(100, 'Complete!'); loadLeads(); loadStats(); document.getElementById('pipelineStatus').textContent = 'Idle'; }
-    }
-    if (!d.logs.some(l => l.includes('Synced') || l.includes('complete'))) {
-      setTimeout(pollLogs, 2000);
-    }
-  } catch(e) {}
-}
-
-function addLog(msg, type='info') {
-  const box  = document.getElementById('logBox');
-  const line = document.createElement('div');
-  line.className = 'log-line ' + type;
-  line.textContent = msg;
-  box.appendChild(line);
-  box.scrollTop = box.scrollHeight;
-  if (box.children.length === 1 && box.children[0].textContent === 'Waiting for activity...') {
-    box.innerHTML = '';
-    box.appendChild(line);
-  }
-}
-
-function updateProgress(pct, label) {
-  document.getElementById('progressBar').style.width = pct + '%';
-  document.getElementById('stepLabel').textContent = label;
-}
-
-function refreshAll() { loadLeads(); loadStats(); }
-
-// ── Auto-refresh ──────────────────────────────────────────────────────────────
-loadLeads(); loadStats();
-setInterval(() => { loadStats(); }, 10000);
+// Smooth scroll
+document.querySelectorAll('a[href^="#"]').forEach(a => {{
+    a.addEventListener('click', e => {{
+        e.preventDefault();
+        document.querySelector(a.getAttribute('href'))?.scrollIntoView({{behavior:'smooth'}});
+    }});
+}});
+// Animate on scroll
+const observer = new IntersectionObserver(entries => {{
+    entries.forEach(e => {{ if(e.isIntersecting) e.target.style.opacity = 1; }});
+}}, {{threshold: 0.1}});
+document.querySelectorAll('.product-card, .testimonial-card, .feature-item').forEach(el => {{
+    el.style.opacity = '0';
+    el.style.transition = 'opacity 0.5s ease';
+    observer.observe(el);
+}});
 </script>
 </body>
-</html>
-""")
+</html>"""
+        return html
 
 
-# ── API: Stats ────────────────────────────────────────────────────────────────
-@app.get("/api/stats")
-async def stats():
-    try:
-        from database import init_db, count_by_stage, load_leads
-        init_db()
-        counts = count_by_stage()
-        total  = sum(counts.values())
-        return {
-            "total":     total,
-            "new":       counts.get("new", 0),
-            "contacted": counts.get("contacted", 0),
-            "pitched":   counts.get("pitched", 0),
-            "closed":    counts.get("closed", 0),
-        }
-    except Exception as e:
-        return {"total": 0, "new": 0, "contacted": 0, "pitched": 0, "closed": 0, "error": str(e)}
+def generate_preview_for_lead(lead):
+    """Main function — scrape IndiaMART data and generate website for a lead."""
+    company     = lead.get("company") or lead.get("name") or "Company"
+    city        = lead.get("city") or "India"
+    indiamart   = lead.get("indiamart_url") or lead.get("website") or ""
+    products    = lead.get("products") or ""
+    category    = lead.get("category") or "Manufacturer"
 
+    print("[Preview] Generating website for: " + company)
 
-# ── API: Logs (for live streaming to UI) ──────────────────────────────────────
-@app.get("/api/logs")
-async def get_logs(from_: int = 0):
-    return {"logs": log_buffer[from_:], "total": len(log_buffer)}
+    # Scrape IndiaMART data
+    scraper = IndiaMArtScraper()
+    data    = scraper.scrape(indiamart, company, city, products)
+    data["category"] = category
 
+    # Copy phone/email from lead if scraper didn't find them
+    if not data["phone"] and lead.get("phone"):
+        data["phone"] = lead["phone"]
+    if not data["email"] and lead.get("email"):
+        data["email"] = lead["email"]
 
-# ── IndiaMART Scrape ─────────────────────────────────────────────────────────
-@app.get("/leads/indiamart")
-async def run_indiamart(background_tasks: BackgroundTasks, max_per_category: int = 25, clear: bool = False):
-    def _run():
-        try:
-            from indiamart_scraper import IndiaMartLeadPipeline
-            log("[IndiaMART] Starting scraper — Chemicals, Kanpur")
-            log("[IndiaMART] Will clear old leads and fetch fresh data...")
-            pipeline = IndiaMartLeadPipeline()
-            leads = pipeline.run(max_per_category=max_per_category, clear_first=clear)
-            has_phone = sum(1 for l in leads if l.phone)
-            has_email = sum(1 for l in leads if l.email)
-            log("[IndiaMART] Done! " + str(len(leads)) + " leads | " + str(has_phone) + " with phone | " + str(has_email) + " with email")
-        except Exception as e:
-            log("[IndiaMART] Error: " + str(e))
-    background_tasks.add_task(_run)
-    return {"status": "started", "message": "IndiaMART scraper running — Chemicals Kanpur"}
+    # Generate HTML
+    generator = WebsiteGenerator()
+    html      = generator.generate(data, lead_id=lead.get("id"))
 
+    # Store in memory
+    slug = slugify(company)
+    GENERATED_SITES[slug] = {
+        "html":       html,
+        "company":    company,
+        "slug":       slug,
+        "created_at": datetime.utcnow().isoformat(),
+        "lead_id":    lead.get("id"),
+        "preview_url": BASE_URL + "/preview/" + slug,
+    }
 
-# ── Website Preview ──────────────────────────────────────────────────────────
-@app.get("/preview/{slug}", response_class=HTMLResponse)
-async def preview_site(slug: str):
-    from website_generator import GENERATED_SITES
-    site = GENERATED_SITES.get(slug)
-    if not site:
-        return HTMLResponse("<h2 style='font-family:sans-serif;padding:40px'>Preview not generated yet. Click Generate Preview on the dashboard.</h2>", status_code=404)
-    return HTMLResponse(content=site["html"])
-
-
-@app.post("/leads/{lead_id}/preview")
-async def generate_preview(lead_id: int, background_tasks: BackgroundTasks):
-    def _run():
-        try:
-            from database import load_leads
-            from website_generator import generate_preview_for_lead
-            leads = load_leads(limit=500)
-            lead  = next((l for l in leads if l["id"] == lead_id), None)
-            if not lead:
-                log("[Preview] Lead " + str(lead_id) + " not found")
-                return
-            log("[Preview] Generating website for: " + lead.get("company", ""))
-            result = generate_preview_for_lead(lead)
-            log("[Preview] Done! " + result["preview_url"])
-        except Exception as e:
-            log("[Preview] Error: " + str(e))
-    background_tasks.add_task(_run)
-    return {"status": "started"}
-
-
-@app.get("/leads/preview-all")
-async def preview_all(background_tasks: BackgroundTasks, limit: int = 10):
-    def _run():
-        try:
-            from database import load_leads
-            from website_generator import generate_preview_for_lead
-            leads = load_leads(limit=limit)
-            log("[Preview] Generating " + str(len(leads)) + " preview websites...")
-            for lead in leads:
-                if not lead.get("company"):
-                    continue
-                result = generate_preview_for_lead(lead)
-                log("[Preview] " + lead.get("company", "") + " → " + result["preview_url"])
-                import time; time.sleep(1)
-            log("[Preview] All previews generated!")
-        except Exception as e:
-            log("[Preview] Error: " + str(e))
-    background_tasks.add_task(_run)
-    return {"status": "started", "message": "Generating preview websites for " + str(limit) + " leads"}
-
-
-# ── Contact Enrichment ───────────────────────────────────────────────────────
-@app.get("/leads/enrich")
-async def enrich_contacts(background_tasks: BackgroundTasks, limit: int = 30):
-    def _run():
-        try:
-            from contact_finder import BulkContactEnricher
-            log("[Enrich] Starting contact enrichment for " + str(limit) + " leads...")
-            log("[Enrich] Checking JustDial + Google + website scraping...")
-            e = BulkContactEnricher()
-            updated = e.run(limit=limit)
-            log("[Enrich] Done! Updated " + str(updated) + " leads with real contacts")
-        except Exception as e:
-            log("[Enrich] Error: " + str(e))
-    background_tasks.add_task(_run)
-    return {"status": "started", "message": "Contact enrichment running"}
-
-
-# ── Orchestrator ──────────────────────────────────────────────────────────────
-@app.get("/orchestrator/run")
-async def run_orchestrator(background_tasks: BackgroundTasks, scrape: bool = False, enrich: bool = True, outreach: bool = True):
-    def _run():
-        try:
-            from module5_orchestrator import SalesOrchestrator
-            log("[Orchestrator] Starting full pipeline...")
-            orch    = SalesOrchestrator(log_fn=log)
-            results = orch.run_full_pipeline(scrape_fresh=scrape, enrich=enrich, outreach=outreach)
-            log("[Orchestrator] Complete: " + str(results))
-        except Exception as e:
-            log("[Orchestrator] Error: " + str(e))
-    background_tasks.add_task(_run)
-    return {"status": "started"}
-
-
-@app.get("/orchestrator/summary")
-async def pipeline_summary():
-    try:
-        from module5_orchestrator import SalesOrchestrator
-        orch = SalesOrchestrator(log_fn=log)
-        return orch.get_pipeline_summary()
-    except Exception as e:
-        return {"error": str(e)}
-
-
-@app.get("/orchestrator/followups")
-async def run_followups(background_tasks: BackgroundTasks):
-    def _run():
-        try:
-            from module5_orchestrator import SalesOrchestrator
-            orch = SalesOrchestrator(log_fn=log)
-            sent = orch.run_followups()
-            log("[Followup] Sent " + str(sent) + " follow-up messages")
-        except Exception as e:
-            log("[Followup] Error: " + str(e))
-    background_tasks.add_task(_run)
-    return {"status": "started"}
-
-
-# ── Instagram Scrape ─────────────────────────────────────────────────────────
-@app.get("/leads/instagram")
-async def run_instagram(background_tasks: BackgroundTasks):
-    def _run():
-        try:
-            from instagram_scraper import InstagramLeadPipeline
-            log("[Instagram] Starting D2C brand scraper...")
-            pipeline = InstagramLeadPipeline()
-            leads = pipeline.run(max_leads=100)
-            log("[Instagram] Done! Found " + str(len(leads)) + " brand leads")
-        except Exception as e:
-            log("[Instagram] Error: " + str(e))
-    background_tasks.add_task(_run)
-    return {"status": "started", "message": "Instagram scraper running in background"}
-
-
-# ── Leads Seed ────────────────────────────────────────────────────────────────
-
-
-
-# ── Leads Run ─────────────────────────────────────────────────────────────────
-@app.get("/leads/run", response_class=HTMLResponse)
-async def run_leads(background_tasks: BackgroundTasks):
-    def _run():
-        try:
-            from module1_lead_sourcing import LeadSourcingPipeline
-            log("Pipeline starting...")
-            LeadSourcingPipeline().run(max_leads=100)
-            log("Pipeline complete!")
-        except Exception as e:
-            log("Pipeline error: " + str(e))
-    background_tasks.add_task(_run)
-    return HTMLResponse("""<html><body style="background:#0f1117;color:#a78bfa;font-family:Arial;padding:40px;text-align:center">
-        <h2>Pipeline started!</h2><p style="color:#64748b">Go back to <a href="/" style="color:#a78bfa">dashboard</a> to watch live progress.</p>
-        </body></html>""")
-
-
-# ── Clear non-IndiaMART leads ────────────────────────────────────────────────
-@app.get("/leads/clear-old")
-async def clear_old():
+    # Save preview URL back to DB
     try:
         from database import get_conn
         conn = get_conn()
-        cur = conn.cursor()
-        cur.execute("DELETE FROM leads WHERE source != 'indiamart'")
+        cur  = conn.cursor()
+        cur.execute(
+            "UPDATE leads SET linkedin_url=%s WHERE id=%s",
+            (BASE_URL + "/preview/" + slug, lead.get("id"))
+        )
         conn.commit()
-        deleted = cur.rowcount
         cur.close()
         conn.close()
-        log("Cleared " + str(deleted) + " non-IndiaMART leads")
-        return {"status": "ok", "deleted": deleted}
+        print("[Preview] URL saved to DB: /preview/" + slug)
     except Exception as e:
-        return {"status": "error", "error": str(e)}
+        print("[Preview] DB save error: " + str(e))
 
-
-# ── Leads List ────────────────────────────────────────────────────────────────
-@app.get("/leads/list")
-async def list_leads(stage: str = None, limit: int = 200):
-    try:
-        from database import init_db, load_leads
-        init_db()
-        leads = load_leads(stage=stage, limit=limit)
-        return {"total": len(leads), "leads": leads}
-    except Exception as e:
-        return {"total": 0, "leads": [], "error": str(e)}
-
-
-# ── Agent Chat ────────────────────────────────────────────────────────────────
-@app.post("/agent/chat")
-async def agent_chat(request: Request):
-    body    = await request.json()
-    lead    = body.get("lead", {"name": "Test", "website": "test.com", "pain_points": [], "stage": "new"})
-    message = body.get("message", "Hello")
-    channel = body.get("channel", "whatsapp")
-    try:
-        from module2_agent_brain import SalesAgentBrain
-        result = SalesAgentBrain().chat(lead, message, channel=channel)
-        return result
-    except Exception as e:
-        return {"error": str(e), "response": "AI error: " + str(e)}
-
-
-# ── Test Keys ─────────────────────────────────────────────────────────────────
-@app.get("/test-keys")
-async def test_keys():
-    import requests as req
-    results = {}
-    try:
-        import openai
-        openai.OpenAI(api_key=os.environ.get("OPENAI_API_KEY")).models.list()
-        results["openai"] = "Connected"
-    except Exception as e:
-        results["openai"] = "Error: " + str(e)[:60]
-    return {"results": results}
-
-
-# ── Vapi Webhook ──────────────────────────────────────────────────────────────
-@app.post("/vapi/webhook")
-async def vapi_webhook(request: Request):
-    try:
-        body       = await request.json()
-        event_type = body.get("message", {}).get("type", "")
-        call_id    = body.get("message", {}).get("call", {}).get("id", "")
-        log("[Vapi] " + event_type + " | " + call_id)
-        if event_type == "function-call":
-            from module3_voice_agent import handle_function_call
-            fn   = body["message"].get("functionCall", {}).get("name", "")
-            args = body["message"].get("functionCall", {}).get("parameters", {})
-            result = await handle_function_call(fn, args, call_id)
-            return JSONResponse({"result": result})
-    except Exception as e:
-        log("[Vapi] Error: " + str(e))
-    return JSONResponse({"status": "ok"})
-
-
-# ── Twilio Webhook ────────────────────────────────────────────────────────────
-@app.post("/twilio/webhook")
-async def twilio_webhook(request: Request):
-    try:
-        form        = await request.form()
-        from_number = form.get("From", "").replace("whatsapp:", "")
-        body        = form.get("Body", "")
-        log("[WhatsApp] From: " + from_number)
-        from module4_outreach import WhatsAppManager
-        ai_reply = WhatsAppManager().handle_inbound_whatsapp(from_number, body)
-        from twilio.twiml.messaging_response import MessagingResponse
-        resp = MessagingResponse()
-        resp.message(ai_reply)
-        return HTMLResponse(content=str(resp), media_type="application/xml")
-    except Exception as e:
-        log("[Twilio] Error: " + str(e))
-        return HTMLResponse(content="<Response/>", media_type="application/xml")
+    return GENERATED_SITES[slug]
