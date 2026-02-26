@@ -134,7 +134,7 @@ async def dashboard():
         <button class="btn" style="background:#16a34a;color:white" onclick="sendFollowups()">📨 Send Followups</button>
         <button class="btn" style="background:#059669;color:white" onclick="generatePreviews()">🌐 Generate Websites</button>
         <button class="btn btn-ghost" onclick="refreshAll()">↻ Refresh</button>
-        <button class="btn btn-ghost" onclick="downloadCSV()">⬇ Download CSV</button>
+        <button class="btn btn-ghost" onclick="downloadCSV()">&#11015; Download CSV</button>
       </div>
       <div class="progress-wrap">
         <div class="progress-bg"><div class="progress-bar" id="progressBar" style="width:0%"></div></div>
@@ -208,6 +208,7 @@ async def dashboard():
 </div>
 
 <script>
+/* v202602260753 */
 let allLeads = [];
 let selectedLead = null;
 let chatHistory = [];
@@ -531,8 +532,7 @@ function downloadCSV() {
     val = String(val).replace(/"/g, '""');
     return '"' + val + '"';
   }).join(','));
-  const csv = [header, ...rows].join('
-');
+  const csv = [header, ...rows].join('\n');
   const blob = new Blob([csv], {type: 'text/csv'});
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement('a');
