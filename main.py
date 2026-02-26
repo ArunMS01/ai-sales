@@ -655,7 +655,9 @@ async def preview_all(background_tasks: BackgroundTasks, limit: int = 10):
                 import time; time.sleep(1)
             log("[Preview] All previews generated!")
         except Exception as e:
+            import traceback
             log("[Preview] Error: " + str(e))
+            log("[Preview] Traceback: " + traceback.format_exc()[-300:])
     background_tasks.add_task(_run)
     return {"status": "started", "message": "Generating preview websites for " + str(limit) + " leads"}
 
