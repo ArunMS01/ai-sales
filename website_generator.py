@@ -26,6 +26,21 @@ INDUSTRY_IMAGES = {
 PRODUCT_ICONS = ["⚗️","🧪","🏭","🔬","💊","🌿","🧴","⚙️","🔩","📦","🧲","🌡️"]
 
 
+def get_industries(cat):
+    if cat == "Chemicals":
+        return ["Manufacturing","Agriculture","Pharmaceuticals","Construction","Automotive","Food Processing","Textile","Energy"]
+    if cat == "Food & Beverages":
+        return ["Retail","Hotels & Restaurants","Healthcare","Institutions","Airlines","E-Commerce","Supermarkets","Events"]
+    if cat == "Furniture & Home":
+        return ["Residential","Commercial","Hospitality","Healthcare","Education","Industrial","Government","Retail"]
+    if cat == "Clothing & Textiles":
+        return ["Retail","Manufacturing","Education","Healthcare","Hospitality","Sports","Entertainment","Corporate"]
+    if cat == "Electronics":
+        return ["Manufacturing","Healthcare","Construction","Automotive","Power & Energy","Telecom","Commercial","Education"]
+    return ["Manufacturing","Healthcare","Construction","Automotive","Energy","Telecom","Commercial","Education"]
+
+
+
 def slugify(t):
     return re.sub(r'[\s_-]+', '-', re.sub(r'[^\w\s-]', '', t.lower().strip()))[:40]
 
@@ -532,14 +547,7 @@ document.querySelectorAll('.pc,.wc,.tc,.af,.qc,.ic').forEach(el=>{{el.style.opac
 </body></html>"""
 
     def _industries(self, cat):
-        mapping = {
-            "Chemicals":           ["🏭 Manufacturing","🌾 Agriculture","💊 Pharmaceuticals","🏗 Construction","🚗 Automotive","🍽 Food Processing","👗 Textile","⚡ Energy"],
-            "Food & Beverages":    ["🏪 Retail","🏨 Hotels","🏥 Healthcare","🎓 Institutions","✈️ Airlines","🛒 E-Commerce","🏬 Supermarkets","🎪 Events"],
-            "Furniture & Home":    ["🏠 Residential","🏢 Commercial","🏨 Hospitality","🏥 Healthcare","🎓 Education","🏭 Industrial","🏛 Government","✈️ Hospitality"],
-            "Clothing & Textiles": ["🛒 Retail","🏭 Manufacturing","🎓 Education","🏥 Healthcare","🏨 Hospitality","⚽ Sports","🎭 Entertainment","🏢 Corporate"],
-            "Electronics":         ["🏭 Manufacturing","🏥 Healthcare","🏗 Construction","🚗 Automotive","⚡ Power","📡 Telecom","🏢 Commercial","🎓 Education"],
-        }
-        return mapping.get(cat, ["🏭 Manufacturing","🏥 Healthcare","🏗 Construction","🚗 Automotive","⚡ Energy","📡 Telecom","🏢 Commercial","🎓 Education"])
+        return get_industries(cat)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
