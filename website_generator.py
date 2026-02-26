@@ -532,23 +532,28 @@ document.querySelectorAll('.pc,.wc,.tc,.af,.qc,.ic').forEach(el=>{{el.style.opac
 </body></html>"""
 
     def _industries(self, cat):
-        return {{
+        mapping = {
             "Chemicals":           ["🏭 Manufacturing","🌾 Agriculture","💊 Pharmaceuticals","🏗 Construction","🚗 Automotive","🍽 Food Processing","👗 Textile","⚡ Energy"],
             "Food & Beverages":    ["🏪 Retail","🏨 Hotels","🏥 Healthcare","🎓 Institutions","✈️ Airlines","🛒 E-Commerce","🏬 Supermarkets","🎪 Events"],
             "Furniture & Home":    ["🏠 Residential","🏢 Commercial","🏨 Hospitality","🏥 Healthcare","🎓 Education","🏭 Industrial","🏛 Government","✈️ Hospitality"],
             "Clothing & Textiles": ["🛒 Retail","🏭 Manufacturing","🎓 Education","🏥 Healthcare","🏨 Hospitality","⚽ Sports","🎭 Entertainment","🏢 Corporate"],
             "Electronics":         ["🏭 Manufacturing","🏥 Healthcare","🏗 Construction","🚗 Automotive","⚡ Power","📡 Telecom","🏢 Commercial","🎓 Education"],
-        }}.get(cat, ["🏭 Manufacturing","🏥 Healthcare","🏗 Construction","🚗 Automotive","⚡ Energy","📡 Telecom","🏢 Commercial","🎓 Education"])
+        }
+        return mapping.get(cat, ["🏭 Manufacturing","🏥 Healthcare","🏗 Construction","🚗 Automotive","⚡ Energy","📡 Telecom","🏢 Commercial","🎓 Education"])
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MAIN ENTRY POINT
 # ─────────────────────────────────────────────────────────────────────────────
 def generate_preview_for_lead(lead):
-    company   = lead.get("company") or lead.get("name") or "Company"
-    city      = lead.get("city") or "India"
-    indiamart = lead.get("indiamart_url") or lead.get("website") or ""
-    category  = lead.get("category") or "Chemicals"
+    # Sanitize — DB can return pain_points as list, products as None, etc.
+    if isinstance(lead, dict):
+        lead = {k: (v if not isinstance(v, (list, dict)) else str(v)) 
+                for k, v in lead.items()}
+    company   = str(lead.get("company") or lead.get("name") or "Company")[:80]
+    city      = str(lead.get("city") or "India")[:50]
+    indiamart = str(lead.get("indiamart_url") or lead.get("website") or "")
+    category  = str(lead.get("category") or "Chemicals")
 
     print(f"[Preview] Generating for: {company}")
 
