@@ -134,6 +134,7 @@ async def dashboard():
         <button class="btn" style="background:#16a34a;color:white" onclick="sendFollowups()">📨 Send Followups</button>
         <button class="btn" style="background:#059669;color:white" onclick="generatePreviews()">🌐 Generate Websites</button>
         <button class="btn btn-ghost" onclick="refreshAll()">↻ Refresh</button>
+        <button class="btn btn-ghost" onclick="downloadCSV()">⬇ Download CSV</button>
       </div>
       <div class="progress-wrap">
         <div class="progress-bg"><div class="progress-bar" id="progressBar" style="width:0%"></div></div>
@@ -516,6 +517,31 @@ function updateProgress(pct, label) {
 }
 
 function refreshAll() { loadLeads(); loadStats(); }
+
+function downloadCSV() {
+  if (!allLeads || !allLeads.length) {
+    addLog('No leads to download', 'error');
+    return;
+  }
+  const cols = ['id','name','company','phone','email','city','website','source','category','stage','pain_points','created_at'];
+  const header = cols.join(',');
+  const rows = allLeads.map(l => cols.map(c => {
+    let val = l[c] || '';
+    if (Array.isArray(val)) val = val.join(' | ');
+    val = String(val).replace(/"/g, '""');
+    return '"' + val + '"';
+  }).join(','));
+  const csv = [header, ...rows].join('
+');
+  const blob = new Blob([csv], {type: 'text/csv'});
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = 'leads_' + new Date().toISOString().slice(0,10) + '.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+  addLog('Downloaded ' + allLeads.length + ' leads as CSV', 'success');
+}
 
 // ── Auto-refresh ──────────────────────────────────────────────────────────────
 loadLeads(); loadStats();
