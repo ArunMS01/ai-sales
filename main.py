@@ -397,7 +397,7 @@ async function generatePreviews() {
   addLog('Scraping IndiaMART data + building modern websites...', 'info');
   updateProgress(5, 'Generating websites...');
   try {
-    const r = await fetch('/leads/preview-all?limit=10');
+    const r = await fetch('/leads/preview-all?limit=200');
     addLog('Website generation started — check logs for progress', 'success');
     pollLogs();
     setTimeout(() => { loadLeads(); }, 15000);
