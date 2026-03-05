@@ -858,3 +858,25 @@ async def twilio_webhook(request: Request):
     except Exception as e:
         log("[Twilio] Error: " + str(e))
         return HTMLResponse(content="<Response/>", media_type="application/xml")
+
+
+# ── Debug: Show raw lead data ─────────────────────────────────────────────────
+@app.get("/debug/leads-raw")
+async def debug_leads_raw(limit: int = 5):
+    """Show exactly what's stored in DB for first N leads"""
+    from database import load_leads
+    leads = load_leads(limit=limit)
+    return [
+        {
+            "id":           l.get("id"),
+            "company":      l.get("company"),
+            "website":      l.get("website"),
+            "indiamart_url":l.get("indiamart_url"),
+            "city":         l.get("city"),
+            "category":     l.get("category"),
+            "products":     l.get("products"),
+            "phone":        l.get("phone"),
+            "description":  str(l.get("description",""))[:100],
+        }
+        for l in leads
+    ]
