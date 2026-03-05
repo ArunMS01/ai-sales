@@ -72,11 +72,13 @@ def save_leads(leads):
                 (name, website, phone, email, city, source,
                  linkedin_url, job_title, company,
                  seo_score, pagespeed_score, pain_points,
-                 followers, stage, created_at, updated_at)
+                 followers, stage, created_at, updated_at,
+                 indiamart_url, category, products)
                 VALUES (%s, %s, %s, %s, %s, %s,
                         %s, %s, %s,
                         %s, %s, %s,
-                        %s, %s, %s, %s)
+                        %s, %s, %s, %s,
+                        %s, %s, %s)
             """, (
                 str(d.get("name") or "")[:200],
                 str(d.get("website") or "")[:500],
@@ -94,6 +96,9 @@ def save_leads(leads):
                 str(d.get("stage") or "new"),
                 str(d.get("created_at") or datetime.utcnow().isoformat()),
                 datetime.utcnow().isoformat(),
+                str(d.get("indiamart_url") or "")[:500],
+                str(d.get("category") or "")[:100],
+                str(d.get("products") or "")[:1000],
             ))
             conn.commit()
             saved += 1
