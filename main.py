@@ -643,16 +643,23 @@ async def generate_preview(lead_id: int, background_tasks: BackgroundTasks):
 async def preview_all(background_tasks: BackgroundTasks, limit: int = 10):
     def _run():
         try:
+            import os, time
             from database import load_leads
-            from website_generator import generate_preview_for_lead
             leads = load_leads(limit=limit)
             log("[Preview] Generating " + str(len(leads)) + " preview websites...")
+            use_crawler = bool(os.getenv("SCRAPINGBEE_KEY",""))
+            if use_crawler:
+                log("[Preview] Using ScrapingBee crawler for real product data")
+                from indiamart_crawler import generate_preview_with_crawler as gen_fn
+            else:
+                log("[Preview] Using SerpAPI fallback (add SCRAPINGBEE_KEY for better data)")
+                from website_generator import generate_preview_for_lead as gen_fn
             for lead in leads:
                 if not lead.get("company"):
                     continue
-                result = generate_preview_for_lead(lead)
+                result = gen_fn(lead)
                 log("[Preview] " + lead.get("company", "") + " → " + result["preview_url"])
-                import time; time.sleep(1)
+                time.sleep(2 if use_crawler else 1)
             log("[Preview] All previews generated!")
         except Exception as e:
             import traceback
