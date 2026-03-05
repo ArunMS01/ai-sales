@@ -251,16 +251,43 @@ class IndiaMartLeadPipeline:
                         "missing inbound leads from Google Search",
                     ])
 
+                    # Extract real company name from IndiaMART title
+                    # e.g. "Sodium Hydroxide - ABC Chemicals | IndiaMART"
+                    company_name = title
+                    # Split on | to remove "IndiaMART" suffix
+                    parts_pipe = title.split("|")
+                    base = parts_pipe[0].strip()
+                    # Split on - : last part is usually company name
+                    parts_dash = base.split(" - ")
+                    if len(parts_dash) > 1:
+                        company_name = parts_dash[-1].strip()
+                    elif len(parts_pipe) > 1:
+                        company_name = base
+                    else:
+                        company_name = title[:60]
+                    # Sanity check
+                    if len(company_name) < 3 or len(company_name) > 100:
+                        company_name = title[:60]
+
+                    # Extract products from snippet
+                    import re as _re
+                    prod_matches = _re.findall(
+                        r"([A-Z][a-zA-Z ]{3,35})"
+                        r"(?=\s+(?:Manufacturer|Supplier|Exporter|Trader|Dealer))",
+                        snippet
+                    )
+                    products_str = ", ".join(dict.fromkeys(prod_matches[:6])) if prod_matches else snippet[:200]
+
                     cat_leads.append(IndiaMartLead(
-                        name=title, company=title,
-                        website="",  # will be filled by enricher
+                        name=company_name, company=company_name,
+                        website="",
                         phone=phone, email=email,
                         city=TARGET_CITY, category=category,
                         indiamart_url=link,
-                        products=snippet[:150],
+                        products=products_str[:500],
                         pain_points=pain[:3],
                     ))
-                    print("[Found] " + title[:50])
+                    print("[Found] " + company_name[:50] + " | " + link[:60])
                 time.sleep(1)
 
             # ── Enrich with real contacts + real website ───────────────────────
