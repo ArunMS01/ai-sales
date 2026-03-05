@@ -556,26 +556,37 @@ document.querySelectorAll('.pc,.wc,.tc,.af,.qc,.ic').forEach(el=>{{el.style.opac
 def generate_preview_for_lead(lead):
     # Sanitize — DB can return pain_points as list, products as None, etc.
     if isinstance(lead, dict):
-        lead = {k: (v if not isinstance(v, (list, dict)) else str(v)) 
+        lead = {k: (v if not isinstance(v, (list, dict)) else str(v))
                 for k, v in lead.items()}
     company   = str(lead.get("company") or lead.get("name") or "Company")[:80]
     city      = str(lead.get("city") or "India")[:50]
-    indiamart = str(lead.get("indiamart_url") or lead.get("website") or "")
+    indiamart = str(lead.get("indiamart_url") or "")
     category  = str(lead.get("category") or "Chemicals")
+    phone     = str(lead.get("phone") or "")
+    email     = str(lead.get("email") or "")
 
     print(f"[Preview] Generating for: {company}")
 
-    # Step 1: Fetch real data via SerpAPI
-    fetcher = RealDataFetcher()
-    raw     = fetcher.fetch(company, city, indiamart, category)
+    # Step 1: Check if products already saved in DB from scraper
+    db_products_raw = str(lead.get("products") or "")
+    db_products = [p.strip() for p in db_products_raw.split(",") if p.strip() and len(p.strip()) > 3]
 
-    phone = raw.get("phone") or str(lead.get("phone") or "")
-    email = raw.get("email") or str(lead.get("email") or "")
-
-    # Step 2: Extract real products with OpenAI
     extractor = ProductExtractor()
-    products  = extractor.extract(company, category, raw["raw_text"], raw.get("indiamart_snippet",""))
-    desc      = extractor.generate_description(company, city, category, products)
+
+    if db_products and len(db_products) >= 2:
+        # Use real products already scraped from IndiaMART
+        print(f"[Preview] Using {len(db_products)} products from DB for {company}")
+        products = db_products[:8]
+        desc     = extractor.generate_description(company, city, category, products)
+    else:
+        # Fall back to SerpAPI search
+        print(f"[Preview] No DB products for {company} — searching SerpAPI")
+        fetcher  = RealDataFetcher()
+        raw      = fetcher.fetch(company, city, indiamart, category)
+        products = extractor.extract(company, category, raw["raw_text"], raw.get("indiamart_snippet",""))
+        desc     = extractor.generate_description(company, city, category, products)
+        if not phone and raw.get("phone"): phone = raw["phone"]
+        if not email and raw.get("email"): email = raw["email"]
 
     # Step 3: Build website
     slug    = slugify(company)
