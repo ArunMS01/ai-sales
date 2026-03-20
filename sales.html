@@ -1,0 +1,1119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Maiden Stride — The Digital World</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { width:100%; height:100%; overflow:hidden; background:#000; font-family:'DM Sans',sans-serif; }
+
+  #c { display:block; width:100%; height:100%; }
+
+  /* ── CROSSHAIR ── */
+  #crosshair {
+    position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+    width:20px; height:20px; pointer-events:none; z-index:10;
+    opacity:0; transition:opacity 0.3s;
+  }
+  #crosshair::before, #crosshair::after {
+    content:''; position:absolute; background:rgba(255,255,255,0.7); border-radius:2px;
+  }
+  #crosshair::before { width:2px; height:100%; left:50%; transform:translateX(-50%); }
+  #crosshair::after  { width:100%; height:2px; top:50%;  transform:translateY(-50%); }
+  body.locked #crosshair { opacity:1; }
+
+  /* ── HUD ── */
+  #hud {
+    position:fixed; top:0; left:0; right:0;
+    padding:20px 32px; z-index:20;
+    display:flex; justify-content:space-between; align-items:center;
+    background:linear-gradient(to bottom,rgba(0,0,0,0.7),transparent);
+    pointer-events:none;
+    opacity:0; transition:opacity 0.6s;
+  }
+  #hud.show { opacity:1; }
+  .hud-logo { font-family:'Syne',sans-serif; font-size:20px; font-weight:800; color:#fff; letter-spacing:-0.5px; }
+  .hud-logo span { color:#e53935; }
+  #hud-hint {
+    font-size:12px; color:rgba(255,255,255,0.45); letter-spacing:2px;
+    text-transform:uppercase; animation:hintPulse 2.5s ease infinite;
+  }
+  @keyframes hintPulse { 0%,100%{opacity:0.4} 50%{opacity:0.9} }
+
+  /* ── MINIMAP ── */
+  #minimap {
+    position:fixed; bottom:24px; right:24px; z-index:20;
+    width:140px; height:100px;
+    background:rgba(0,0,0,0.6); border:1px solid rgba(255,255,255,0.1);
+    border-radius:10px; padding:8px; backdrop-filter:blur(8px);
+    opacity:0; transition:opacity 0.6s;
+  }
+  #minimap.show { opacity:1; }
+  #minimap canvas { width:100%; height:100%; border-radius:4px; }
+
+  /* ── PROXIMITY LABEL ── */
+  #prox-label {
+    position:fixed; bottom:80px; left:50%; transform:translateX(-50%);
+    z-index:20; opacity:0; transition:opacity 0.4s, transform 0.4s;
+    transform:translateX(-50%) translateY(8px);
+    pointer-events:none;
+  }
+  #prox-label.show { opacity:1; transform:translateX(-50%) translateY(0); }
+  .prox-inner {
+    background:rgba(0,0,0,0.75); backdrop-filter:blur(12px);
+    border:1px solid rgba(255,255,255,0.15); border-radius:100px;
+    padding:10px 24px; display:flex; align-items:center; gap:12px;
+    font-size:13px; color:#fff; white-space:nowrap;
+  }
+  .prox-key {
+    background:rgba(255,255,255,0.15); border:1px solid rgba(255,255,255,0.25);
+    border-radius:6px; padding:3px 10px; font-size:11px;
+    font-weight:600; letter-spacing:1px; color:rgba(255,255,255,0.8);
+  }
+  .prox-dot { width:8px; height:8px; border-radius:50%; animation:proxPulse 1s ease infinite; }
+  @keyframes proxPulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.4)} }
+
+  /* ── INTRO OVERLAY ── */
+  #intro {
+    position:fixed; inset:0; z-index:100;
+    background:radial-gradient(ellipse at 50% 60%, #0d0520 0%, #000 70%);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    transition:opacity 1.2s ease;
+  }
+  #intro.fade { opacity:0; pointer-events:none; }
+  .intro-tagline {
+    font-size:12px; letter-spacing:5px; text-transform:uppercase;
+    color:rgba(255,255,255,0.3); margin-bottom:24px;
+    animation:fadeUp 0.8s 0.2s ease both;
+  }
+  .intro-title {
+    font-family:'Syne',sans-serif; font-size:clamp(40px,7vw,80px);
+    font-weight:800; color:#fff; letter-spacing:-2px; line-height:1;
+    text-align:center; margin-bottom:12px;
+    animation:fadeUp 0.8s 0.4s ease both;
+  }
+  .intro-title em { font-style:normal; color:#e53935; }
+  .intro-sub {
+    font-size:16px; color:rgba(255,255,255,0.4); margin-bottom:52px;
+    font-weight:300; animation:fadeUp 0.8s 0.6s ease both;
+  }
+  .intro-btn {
+    background:#e53935; color:#fff; border:none;
+    padding:18px 52px; border-radius:100px; cursor:pointer;
+    font-family:'Syne',sans-serif; font-size:16px; font-weight:700; letter-spacing:1px;
+    box-shadow:0 0 60px rgba(229,57,53,0.4);
+    animation:fadeUp 0.8s 0.8s ease both;
+    transition:transform 0.2s, box-shadow 0.2s;
+  }
+  .intro-btn:hover { transform:scale(1.04); box-shadow:0 0 80px rgba(229,57,53,0.6); }
+  .intro-note { font-size:12px; color:rgba(255,255,255,0.2); margin-top:16px; letter-spacing:1px; animation:fadeUp 0.8s 1s ease both; }
+
+  /* rings */
+  .intro-rings {
+    position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+    pointer-events:none; z-index:-1;
+  }
+  .intro-ring {
+    position:absolute; border-radius:50%;
+    border:1px solid rgba(229,57,53,0.2);
+    top:50%; left:50%; transform:translate(-50%,-50%);
+    animation:ringExpand 4s ease infinite;
+  }
+  .intro-ring:nth-child(1) { width:300px; height:300px; animation-delay:0s; }
+  .intro-ring:nth-child(2) { width:500px; height:500px; animation-delay:1s; }
+  .intro-ring:nth-child(3) { width:700px; height:700px; animation-delay:2s; }
+  @keyframes ringExpand { 0%{opacity:0.5;transform:translate(-50%,-50%) scale(0.8)} 100%{opacity:0;transform:translate(-50%,-50%) scale(1.4)} }
+
+  /* ── SHOP PANEL (slides in from right) ── */
+  #shop-panel {
+    position:fixed; top:0; right:0; bottom:0; width:min(460px,100vw);
+    z-index:50; background:#0a0612;
+    border-left:1px solid rgba(255,255,255,0.07);
+    transform:translateX(100%); transition:transform 0.5s cubic-bezier(0.16,1,0.3,1);
+    overflow-y:auto; padding:40px 36px;
+    box-shadow:-20px 0 60px rgba(0,0,0,0.8);
+  }
+  #shop-panel.open { transform:translateX(0); }
+  #shop-panel::-webkit-scrollbar { width:4px; }
+  #shop-panel::-webkit-scrollbar-track { background:transparent; }
+  #shop-panel::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.1); border-radius:4px; }
+
+  .panel-close {
+    position:absolute; top:16px; right:16px;
+    width:36px; height:36px; border-radius:50%;
+    background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1);
+    color:rgba(255,255,255,0.6); font-size:18px; cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+    transition:all 0.2s;
+  }
+  .panel-close:hover { background:rgba(229,57,53,0.2); color:#fff; }
+
+  .panel-type { font-size:10px; letter-spacing:3px; text-transform:uppercase; margin-bottom:10px; display:block; }
+  .panel-name { font-family:'Syne',sans-serif; font-size:28px; font-weight:800; color:#fff; margin-bottom:6px; line-height:1.1; }
+  .panel-tagline { font-size:14px; color:rgba(255,255,255,0.4); margin-bottom:24px; font-weight:300; }
+  .panel-price { font-family:'Syne',sans-serif; font-size:52px; font-weight:800; line-height:1; margin-bottom:4px; letter-spacing:-2px; }
+  .panel-price small { font-size:18px; opacity:0.5; vertical-align:super; font-weight:500; margin-right:4px; }
+  .panel-divider { height:1px; background:rgba(255,255,255,0.07); margin:24px 0; }
+  .panel-features { list-style:none; display:flex; flex-direction:column; gap:10px; margin-bottom:28px; }
+  .panel-features li { display:flex; align-items:flex-start; gap:10px; font-size:13.5px; color:rgba(255,255,255,0.7); line-height:1.5; }
+  .feat-check { width:18px; height:18px; border-radius:50%; display:flex; align-items:center; justify-content:center; flex-shrink:0; margin-top:1px; }
+  .feat-check svg { width:9px; height:9px; }
+  .panel-cta {
+    display:block; width:100%; padding:16px; text-align:center; border-radius:14px;
+    font-size:15px; font-weight:700; font-family:'Syne',sans-serif; letter-spacing:0.5px;
+    text-decoration:none; color:#fff; border:none; cursor:pointer;
+    transition:transform 0.15s, box-shadow 0.2s;
+    margin-bottom:12px;
+  }
+  .panel-cta:hover { transform:scale(1.02); }
+  .panel-section-label { font-size:10px; letter-spacing:2px; text-transform:uppercase; color:rgba(255,255,255,0.3); margin:20px 0 10px; display:block; }
+  .panel-chips { display:flex; flex-wrap:wrap; gap:6px; }
+  .panel-chip {
+    background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08);
+    border-radius:100px; padding:4px 12px; font-size:11px; color:rgba(255,255,255,0.5);
+  }
+
+  /* ── CONTROLS HINT (bottom left) ── */
+  #controls-hint {
+    position:fixed; bottom:24px; left:24px; z-index:20;
+    background:rgba(0,0,0,0.6); backdrop-filter:blur(8px);
+    border:1px solid rgba(255,255,255,0.08);
+    border-radius:12px; padding:12px 16px;
+    opacity:0; transition:opacity 0.6s;
+    pointer-events:none;
+  }
+  #controls-hint.show { opacity:1; }
+  .ctrl-row { display:flex; align-items:center; gap:8px; margin-bottom:6px; font-size:11px; color:rgba(255,255,255,0.4); }
+  .ctrl-row:last-child { margin-bottom:0; }
+  .ctrl-key {
+    background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.15);
+    border-radius:4px; padding:2px 7px; font-size:10px; font-weight:600;
+    color:rgba(255,255,255,0.6); font-family:monospace;
+  }
+
+  /* ── AMBIENT SOUND TOGGLE ── */
+  #sound-btn {
+    position:fixed; top:20px; right:80px; z-index:20;
+    background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1);
+    border-radius:50%; width:40px; height:40px; cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+    color:rgba(255,255,255,0.5); font-size:16px;
+    transition:all 0.2s; opacity:0;
+  }
+  #sound-btn.show { opacity:1; }
+
+  /* ── MOBILE JOYSTICK ── */
+  #mobile-controls {
+    position:fixed; bottom:24px; left:50%; transform:translateX(-50%);
+    z-index:20; display:none; gap:8px;
+  }
+  @media(max-width:768px) { #mobile-controls { display:flex; } }
+  .m-btn {
+    width:56px; height:56px; border-radius:50%;
+    background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15);
+    color:#fff; font-size:20px; cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+    backdrop-filter:blur(8px); transition:background 0.15s;
+    -webkit-tap-highlight-color:transparent;
+    user-select:none;
+  }
+  .m-btn:active { background:rgba(229,57,53,0.3); }
+
+  /* ── LOADING BAR ── */
+  #loader {
+    position:fixed; inset:0; z-index:200;
+    background:#000; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:20px;
+    transition:opacity 0.8s;
+  }
+  #loader.hide { opacity:0; pointer-events:none; }
+  .loader-logo { font-family:'Syne',sans-serif; font-size:32px; font-weight:800; color:#fff; }
+  .loader-logo span { color:#e53935; }
+  .loader-bar-wrap { width:200px; height:3px; background:rgba(255,255,255,0.1); border-radius:2px; overflow:hidden; }
+  .loader-bar { height:100%; background:#e53935; border-radius:2px; width:0; transition:width 0.4s ease; }
+  .loader-text { font-size:11px; color:rgba(255,255,255,0.3); letter-spacing:2px; text-transform:uppercase; }
+
+  @keyframes fadeUp { from{opacity:0;transform:translateY(24px)} to{opacity:1;transform:translateY(0)} }
+</style>
+</head>
+<body>
+
+<!-- LOADER -->
+<div id="loader">
+  <div class="loader-logo">Maiden<span>Stride</span></div>
+  <div class="loader-bar-wrap"><div class="loader-bar" id="loader-bar"></div></div>
+  <div class="loader-text" id="loader-text">Initializing world...</div>
+</div>
+
+<!-- INTRO -->
+<div id="intro" style="display:none;">
+  <div class="intro-rings">
+    <div class="intro-ring"></div><div class="intro-ring"></div><div class="intro-ring"></div>
+  </div>
+  <div class="intro-tagline">Qatar's Digital Marketing Agency</div>
+  <div class="intro-title">Walk Into<br>The <em>Digital World</em></div>
+  <div class="intro-sub">A first-person journey through our marketplace</div>
+  <button class="intro-btn" id="enter-btn">Enter The World</button>
+  <div class="intro-note">Click to lock cursor · WASD / Arrow keys to move · Mouse to look</div>
+</div>
+
+<!-- 3D Canvas -->
+<canvas id="c"></canvas>
+
+<!-- Crosshair -->
+<div id="crosshair"></div>
+
+<!-- HUD -->
+<div id="hud">
+  <div class="hud-logo">Maiden<span>Stride</span></div>
+  <div id="hud-hint">Walk towards the glowing shops</div>
+</div>
+
+<!-- Proximity label -->
+<div id="prox-label">
+  <div class="prox-inner">
+    <div class="prox-dot" id="prox-dot"></div>
+    <span id="prox-text">Nearby</span>
+    <span class="prox-key">E</span>
+    <span style="color:rgba(255,255,255,0.5);">to enter</span>
+  </div>
+</div>
+
+<!-- Controls hint -->
+<div id="controls-hint">
+  <div class="ctrl-row"><span class="ctrl-key">W A S D</span><span>Move</span></div>
+  <div class="ctrl-row"><span class="ctrl-key">Mouse</span><span>Look around</span></div>
+  <div class="ctrl-row"><span class="ctrl-key">E</span><span>Enter shop</span></div>
+  <div class="ctrl-row"><span class="ctrl-key">ESC</span><span>Exit / Close</span></div>
+</div>
+
+<!-- Minimap -->
+<div id="minimap"><canvas id="mm-canvas"></canvas></div>
+
+<!-- Shop panel -->
+<div id="shop-panel" id="shop-panel">
+  <button class="panel-close" onclick="closePanel()">✕</button>
+  <div id="panel-content"></div>
+</div>
+
+<!-- Mobile controls -->
+<div id="mobile-controls">
+  <button class="m-btn" id="m-left">◀</button>
+  <button class="m-btn" id="m-fwd">▲</button>
+  <button class="m-btn" id="m-back">▼</button>
+  <button class="m-btn" id="m-right">▶</button>
+  <button class="m-btn" id="m-enter" style="background:rgba(229,57,53,0.2);">⬛</button>
+</div>
+
+<!-- THREE.JS CDN -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+// SHOP DATA
+// ═══════════════════════════════════════════════════════════
+const SHOP_DATA = [
+  {
+    id:'starter', name:'Starter Package', type:'Website Package',
+    price:'1,400', currency:'QAR',
+    tagline:'Your first step into the digital world',
+    color:0x00c853, colorHex:'#00c853', glowHex:'rgba(0,200,83,0.4)',
+    signColor:0x00e676,
+    features:[
+      'Up to 5 pages (Home, About, 2 Services, Contact)',
+      'Static layout & clean responsive design',
+      'Content writing: 3,000 words',
+      'WhatsApp Click-to-Chat integration',
+      'Domain — Free for 1 year',
+      'Web Hosting — Free for 1 year',
+      'SSL Certificate — Free for 1 year',
+      '1 professional email — Free for 1 year',
+      '7 days maintenance & support'
+    ],
+    bizTypes:['Yoga / Fitness instructor','Wedding photographer','Independent consultant','Event planning','Catering service','Local artist'],
+    whatsapp:'I am interested in the Starter Package (QAR 1,400). Can you help?'
+  },
+  {
+    id:'professional', name:'Professional Package', type:'⭐ Most Popular',
+    price:'2,300', currency:'QAR',
+    tagline:'The #1 choice for established Qatar businesses',
+    color:0xe53935, colorHex:'#e53935', glowHex:'rgba(229,57,53,0.5)',
+    signColor:0xff5252,
+    features:[
+      'Up to 10 pages (Home, About, 7 inner, Contact)',
+      'Customized layout & premium design',
+      'Content writing: 6,500 words',
+      'Responsive mobile-first design',
+      'WhatsApp Lead Capture & Chat',
+      'Domain — Free for 1 year',
+      'Web Hosting — Free for 1 year',
+      'SSL Certificate — Free for 1 year',
+      '2 professional emails — Free for 1 year',
+      '15 days maintenance & support'
+    ],
+    bizTypes:['Dental / Medical clinic','Law firm','Fashion boutique','Gym & fitness center','Accounting firm','Interior designer','B2B services','Car dealership'],
+    whatsapp:'I am interested in the Professional Package (QAR 2,300). Can you help?'
+  },
+  {
+    id:'enterprise', name:'Enterprise Package', type:'Website Package',
+    price:'3,100', currency:'QAR',
+    tagline:'The complete, limitless digital empire',
+    color:0xffd600, colorHex:'#ffd600', glowHex:'rgba(255,214,0,0.4)',
+    signColor:0xffea00,
+    features:[
+      'Unlimited pages + dynamic layout system',
+      'Premium, fully custom design',
+      'Content writing: 10,000 words',
+      'Responsive mobile-first design',
+      'WhatsApp Lead Capture & Chat',
+      'Domain — Free for 1 year',
+      'Web Hosting — Free for 1 year',
+      'SSL Certificate — Free for 1 year',
+      '5 professional emails — Free for 1 year',
+      '30 days maintenance & support'
+    ],
+    bizTypes:['Real estate agency','University / college','National franchise','Tech companies','Government websites','Financial institution','Multi-location restaurants'],
+    whatsapp:'I am interested in the Enterprise Package (QAR 3,100). Can you help?'
+  },
+  {
+    id:'addons', name:'Add-Ons Bazaar', type:'Power-Ups',
+    price:null, currency:'QAR',
+    tagline:'Supercharge any package with these extras',
+    color:0x2979ff, colorHex:'#2979ff', glowHex:'rgba(41,121,255,0.4)',
+    signColor:0x448aff,
+    features:[
+      'Logo Design — QAR 200',
+      'Blog / News Section — QAR 700',
+      'Image Gallery — QAR 400',
+      'E-commerce Store — QAR 1,200',
+      'Business Essentials Kit — QAR 300',
+      'SEO Foundation Setup — QAR 450',
+      'Live Chat Widget — QAR 150',
+      'Online Booking System — QAR 600'
+    ],
+    bizTypes:['Add to any package','Mix and match freely','Custom bundles available','Ask for a tailored quote'],
+    whatsapp:'I am interested in add-ons for my website package. Can you help?'
+  }
+];
+
+// ═══════════════════════════════════════════════════════════
+// SCENE SETUP
+// ═══════════════════════════════════════════════════════════
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias:true, powerPreference:'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.2;
+renderer.outputEncoding = THREE.sRGBEncoding;
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x0a0020, 0.045);
+scene.background = new THREE.Color(0x050010);
+
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 200);
+camera.position.set(0, 1.7, 14);
+camera.rotation.order = 'YXZ';
+
+// ═══════════════════════════════════════════════════════════
+// LOADING SIMULATION
+// ═══════════════════════════════════════════════════════════
+const loaderBar = document.getElementById('loader-bar');
+const loaderText = document.getElementById('loader-text');
+const loadSteps = ['Initializing world...','Building city...','Placing shops...','Lighting neons...','Ready!'];
+let loadStep = 0;
+const loadInterval = setInterval(() => {
+  loadStep++;
+  loaderBar.style.width = (loadStep/loadSteps.length*100) + '%';
+  loaderText.textContent = loadSteps[Math.min(loadStep, loadSteps.length-1)];
+  if (loadStep >= loadSteps.length) {
+    clearInterval(loadInterval);
+    setTimeout(() => {
+      document.getElementById('loader').classList.add('hide');
+      setTimeout(() => {
+        document.getElementById('loader').style.display='none';
+        document.getElementById('intro').style.display='flex';
+      }, 800);
+    }, 400);
+  }
+}, 350);
+
+// ═══════════════════════════════════════════════════════════
+// LIGHTING
+// ═══════════════════════════════════════════════════════════
+const ambientLight = new THREE.AmbientLight(0x100820, 0.6);
+scene.add(ambientLight);
+
+const moonLight = new THREE.DirectionalLight(0x4040aa, 0.3);
+moonLight.position.set(10, 20, 5);
+scene.add(moonLight);
+
+// ═══════════════════════════════════════════════════════════
+// GROUND
+// ═══════════════════════════════════════════════════════════
+function makeGround() {
+  // Main road
+  const roadGeo = new THREE.PlaneGeometry(12, 120);
+  const roadMat = new THREE.MeshStandardMaterial({
+    color:0x0a0015, roughness:0.9, metalness:0.1
+  });
+  const road = new THREE.Mesh(roadGeo, roadMat);
+  road.rotation.x = -Math.PI/2;
+  road.position.y = 0;
+  road.receiveShadow = true;
+  scene.add(road);
+
+  // Sidewalks
+  [-7, 7].forEach(x => {
+    const sw = new THREE.Mesh(
+      new THREE.PlaneGeometry(4, 120),
+      new THREE.MeshStandardMaterial({ color:0x0d0025, roughness:1 })
+    );
+    sw.rotation.x = -Math.PI/2;
+    sw.position.set(x, 0.02, 0);
+    scene.add(sw);
+  });
+
+  // Road center line (dashes)
+  for (let z = -55; z < 55; z += 4) {
+    const dash = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.12, 2),
+      new THREE.MeshBasicMaterial({ color:0x9b59b6, transparent:true, opacity:0.4 })
+    );
+    dash.rotation.x = -Math.PI/2;
+    dash.position.set(0, 0.01, z);
+    scene.add(dash);
+  }
+
+  // Road edge neon strips
+  [-5.8, 5.8].forEach(x => {
+    const geo = new THREE.BoxGeometry(0.08, 0.04, 120);
+    const mat = new THREE.MeshBasicMaterial({ color:0x7c3aed });
+    const strip = new THREE.Mesh(geo, mat);
+    strip.position.set(x, 0.02, 0);
+    scene.add(strip);
+    // Glow light along road
+    for (let z = -50; z < 50; z += 15) {
+      const light = new THREE.PointLight(0x7c3aed, 0.3, 8);
+      light.position.set(x, 0.1, z);
+      scene.add(light);
+    }
+  });
+}
+makeGround();
+
+// ═══════════════════════════════════════════════════════════
+// SKY / STARS
+// ═══════════════════════════════════════════════════════════
+function makeStars() {
+  const geo = new THREE.BufferGeometry();
+  const count = 2000;
+  const positions = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    positions[i*3]   = (Math.random()-0.5)*300;
+    positions[i*3+1] = 10 + Math.random()*80;
+    positions[i*3+2] = (Math.random()-0.5)*300;
+  }
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  const mat = new THREE.PointsMaterial({ color:0xffffff, size:0.15, transparent:true, opacity:0.8 });
+  scene.add(new THREE.Points(geo, mat));
+}
+makeStars();
+
+// ═══════════════════════════════════════════════════════════
+// CITY BUILDINGS (background)
+// ═══════════════════════════════════════════════════════════
+function makeCityBuildings() {
+  const bColors = [0x0d0025, 0x0a001e, 0x080018];
+  const accentColors = [0xe53935, 0x7c3aed, 0x2979ff, 0x00c853, 0xffd600];
+
+  for (let side = -1; side <= 1; side += 2) {
+    for (let z = -55; z < 55; z += 7 + Math.random()*4) {
+      const w = 4 + Math.random()*6;
+      const h = 8 + Math.random()*28;
+      const d = 4 + Math.random()*5;
+      const bGeo = new THREE.BoxGeometry(w, h, d);
+      const bMat = new THREE.MeshStandardMaterial({
+        color: bColors[Math.floor(Math.random()*bColors.length)],
+        roughness:0.8, metalness:0.2
+      });
+      const b = new THREE.Mesh(bGeo, bMat);
+      b.position.set(side*(10 + Math.random()*8), h/2, z);
+      b.castShadow = true;
+      scene.add(b);
+
+      // Windows
+      const winColor = accentColors[Math.floor(Math.random()*accentColors.length)];
+      for (let wy = 1; wy < h-1; wy += 2.5) {
+        for (let wx = -w/2+0.8; wx < w/2; wx += 1.8) {
+          if (Math.random() > 0.35) {
+            const wGeo = new THREE.PlaneGeometry(0.7, 0.9);
+            const wMat = new THREE.MeshBasicMaterial({
+              color: winColor, transparent:true,
+              opacity: 0.15 + Math.random()*0.5
+            });
+            const win = new THREE.Mesh(wGeo, wMat);
+            win.position.set(
+              b.position.x + wx + 0.5,
+              wy + 0.5,
+              b.position.z + d/2 * (side < 0 ? 1 : -1) + 0.01
+            );
+            scene.add(win);
+          }
+        }
+      }
+
+      // Rooftop accent light
+      const roofLight = new THREE.PointLight(winColor, 0.4, 12);
+      roofLight.position.set(b.position.x, h + 1, z);
+      scene.add(roofLight);
+    }
+  }
+}
+makeCityBuildings();
+
+// ═══════════════════════════════════════════════════════════
+// LAMP POSTS
+// ═══════════════════════════════════════════════════════════
+function makeLampPosts() {
+  const lampPositions = [-50,-36,-22,-8,5,19,33,47];
+  lampPositions.forEach(z => {
+    [-5.5, 5.5].forEach(x => {
+      // Pole
+      const pole = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.05, 0.07, 5, 8),
+        new THREE.MeshStandardMaterial({ color:0x1a1a2e, metalness:0.8, roughness:0.3 })
+      );
+      pole.position.set(x, 2.5, z);
+      scene.add(pole);
+
+      // Arm
+      const arm = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.03, 0.03, 1.5, 6),
+        new THREE.MeshStandardMaterial({ color:0x1a1a2e, metalness:0.8 })
+      );
+      arm.rotation.z = Math.PI/2;
+      arm.position.set(x + (x>0?-0.75:0.75), 5.1, z);
+      scene.add(arm);
+
+      // Bulb
+      const bulbColor = [0x9b59b6, 0x2979ff, 0xe91e63][Math.floor(Math.random()*3)];
+      const bulb = new THREE.Mesh(
+        new THREE.SphereGeometry(0.15, 8, 8),
+        new THREE.MeshBasicMaterial({ color:bulbColor })
+      );
+      bulb.position.set(x + (x>0?-1.5:1.5), 5.0, z);
+      scene.add(bulb);
+
+      const lampLight = new THREE.PointLight(bulbColor, 1.2, 10);
+      lampLight.position.copy(bulb.position);
+      lampLight.position.y -= 0.3;
+      scene.add(lampLight);
+    });
+  });
+}
+makeLampPosts();
+
+// ═══════════════════════════════════════════════════════════
+// SHOP BUILDINGS
+// ═══════════════════════════════════════════════════════════
+const shopObjects = [];
+const SHOP_Z_POSITIONS = [-32, -12, 8, 28];
+const SHOP_SIDE = -1; // left side
+
+function makeShop(data, zPos) {
+  const group = new THREE.Group();
+  const col = data.color;
+  const signCol = data.signColor;
+
+  // === BUILDING BODY ===
+  const bW=7, bH=10, bD=5;
+  const buildingMat = new THREE.MeshStandardMaterial({
+    color:0x0a001a, roughness:0.7, metalness:0.1,
+    emissive: new THREE.Color(col).multiplyScalar(0.03)
+  });
+  const building = new THREE.Mesh(new THREE.BoxGeometry(bW,bH,bD), buildingMat);
+  building.position.set(0, bH/2, 0);
+  building.castShadow = true; building.receiveShadow = true;
+  group.add(building);
+
+  // === FACADE FRAME (neon border) ===
+  const frameEdges = [
+    {size:[bW, 0.08, 0.08], pos:[0, bH, bD/2]},
+    {size:[bW, 0.08, 0.08], pos:[0, 0.02, bD/2]},
+    {size:[0.08, bH, 0.08], pos:[-bW/2, bH/2, bD/2]},
+    {size:[0.08, bH, 0.08], pos:[bW/2, bH/2, bD/2]},
+  ];
+  frameEdges.forEach(e => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(...e.size), new THREE.MeshBasicMaterial({color:col}));
+    m.position.set(...e.pos);
+    group.add(m);
+  });
+
+  // === WINDOWS ===
+  const winMat = new THREE.MeshBasicMaterial({ color:col, transparent:true, opacity:0.15 });
+  const winBorderMat = new THREE.MeshBasicMaterial({ color:col, transparent:true, opacity:0.6 });
+  [[-2,-0.2],[0,-0.2],[2,-0.2],[-2,-3],[0,-3],[2,-3]].forEach(([wx,wy]) => {
+    const win = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 1.6), winMat);
+    win.position.set(wx, bH/2+wy, bD/2+0.01);
+    group.add(win);
+    // window frame
+    const wf = new THREE.Mesh(new THREE.PlaneGeometry(1.35, 1.75),
+      new THREE.MeshBasicMaterial({color:col, transparent:true, opacity:0.3, wireframe:false}));
+    wf.position.set(wx, bH/2+wy, bD/2+0.005);
+    group.add(wf);
+  });
+
+  // === BIG SHOP SIGN ===
+  const signGeo = new THREE.BoxGeometry(6.5, 1.4, 0.15);
+  const signMat = new THREE.MeshStandardMaterial({
+    color:0x050010, emissive: new THREE.Color(col).multiplyScalar(0.4),
+    roughness:0.3
+  });
+  const sign = new THREE.Mesh(signGeo, signMat);
+  sign.position.set(0, bH+0.8, bD/2+0.08);
+  group.add(sign);
+
+  // Sign border glow
+  const signBorder = new THREE.Mesh(
+    new THREE.BoxGeometry(6.7, 1.6, 0.05),
+    new THREE.MeshBasicMaterial({ color:col })
+  );
+  signBorder.position.set(0, bH+0.8, bD/2+0.05);
+  group.add(signBorder);
+
+  // === PRICE TAG ===
+  const priceGeo = new THREE.BoxGeometry(3, 1.8, 0.1);
+  const priceMat = new THREE.MeshStandardMaterial({
+    color:0x000000,
+    emissive: new THREE.Color(col).multiplyScalar(0.2),
+    transparent:true, opacity:0.95
+  });
+  const priceBox = new THREE.Mesh(priceGeo, priceMat);
+  priceBox.position.set(0, bH/2+1.5, bD/2+0.01);
+  group.add(priceBox);
+
+  const priceBorderMat = new THREE.MeshBasicMaterial({color:col, transparent:true, opacity:0.7});
+  const priceBorder = new THREE.Mesh(new THREE.BoxGeometry(3.15, 1.95, 0.05), priceBorderMat);
+  priceBorder.position.set(0, bH/2+1.5, bD/2+0.005);
+  group.add(priceBorder);
+
+  // === DOOR ===
+  const doorMat = new THREE.MeshStandardMaterial({
+    color:0x0a001a, emissive: new THREE.Color(col).multiplyScalar(0.05),
+    transparent:true, opacity:0.9
+  });
+  const door = new THREE.Mesh(new THREE.BoxGeometry(1.4, 2.6, 0.1), doorMat);
+  door.position.set(0, 1.3, bD/2+0.05);
+  group.add(door);
+  const doorBorder = new THREE.Mesh(
+    new THREE.BoxGeometry(1.55, 2.75, 0.06),
+    new THREE.MeshBasicMaterial({color:col, transparent:true, opacity:0.5})
+  );
+  doorBorder.position.set(0, 1.3, bD/2+0.02);
+  group.add(doorBorder);
+
+  // Door handle
+  const handle = new THREE.Mesh(
+    new THREE.SphereGeometry(0.07, 8, 8),
+    new THREE.MeshStandardMaterial({color:col, metalness:0.9, roughness:0.1})
+  );
+  handle.position.set(0.5, 1.3, bD/2+0.11);
+  group.add(handle);
+
+  // === CANOPY ===
+  const canopyMat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(col).multiplyScalar(0.3),
+    emissive: new THREE.Color(col).multiplyScalar(0.1),
+    side: THREE.DoubleSide
+  });
+  const canopy = new THREE.Mesh(new THREE.BoxGeometry(7.2, 0.1, 1.8), canopyMat);
+  canopy.position.set(0, 2.8, bD/2+0.9);
+  canopy.rotation.x = -0.15;
+  group.add(canopy);
+
+  // Canopy fringe
+  for (let fx = -3; fx <= 3; fx += 0.6) {
+    const fringe = new THREE.Mesh(
+      new THREE.BoxGeometry(0.08, 0.3, 0.02),
+      new THREE.MeshBasicMaterial({color:col, transparent:true, opacity:0.6})
+    );
+    fringe.position.set(fx, 2.65, bD/2+1.8);
+    group.add(fringe);
+  }
+
+  // === GROUND GLOW ===
+  const gGeo = new THREE.PlaneGeometry(8, 3);
+  const gMat = new THREE.MeshBasicMaterial({
+    color:col, transparent:true, opacity:0.06, side:THREE.DoubleSide
+  });
+  const glow = new THREE.Mesh(gGeo, gMat);
+  glow.rotation.x = -Math.PI/2;
+  glow.position.set(0, 0.01, bD/2+1.5);
+  group.add(glow);
+
+  // === NEON POINT LIGHT ===
+  const shopLight = new THREE.PointLight(col, 2.5, 14);
+  shopLight.position.set(0, 4, bD/2+1);
+  group.add(shopLight);
+
+  const shopLight2 = new THREE.PointLight(col, 1.0, 8);
+  shopLight2.position.set(0, 1, bD/2+3);
+  group.add(shopLight2);
+
+  // === FLOATING PARTICLES ===
+  const particleGeo = new THREE.BufferGeometry();
+  const pCount = 30;
+  const pPos = new Float32Array(pCount*3);
+  for (let i=0;i<pCount;i++){
+    pPos[i*3]   = (Math.random()-0.5)*6;
+    pPos[i*3+1] = Math.random()*10;
+    pPos[i*3+2] = (Math.random()-0.5)*4 + bD/2+0.5;
+  }
+  particleGeo.setAttribute('position', new THREE.BufferAttribute(pPos,3));
+  const pMat = new THREE.PointsMaterial({color:col, size:0.06, transparent:true, opacity:0.7});
+  const particles = new THREE.Points(particleGeo, pMat);
+  group.add(particles);
+
+  // Position group
+  group.position.set(SHOP_SIDE*9.5, 0, zPos);
+  group.rotation.y = SHOP_SIDE * (-Math.PI/2 + 0.05);
+  scene.add(group);
+
+  shopObjects.push({
+    group, data, zPos,
+    worldPos: new THREE.Vector3(SHOP_SIDE*9.5, 0, zPos),
+    light: shopLight, light2: shopLight2,
+    particles, particleGeo, pPos: pPos.slice()
+  });
+
+  return group;
+}
+
+SHOP_DATA.forEach((data, i) => makeShop(data, SHOP_Z_POSITIONS[i]));
+
+// ═══════════════════════════════════════════════════════════
+// DECORATIVE ELEMENTS
+// ═══════════════════════════════════════════════════════════
+// Overhead neon arch at entrance
+function makeArch(z, color) {
+  const archGeo = new THREE.TorusGeometry(6.5, 0.06, 8, 40, Math.PI);
+  const archMat = new THREE.MeshBasicMaterial({color});
+  const arch = new THREE.Mesh(archGeo, archMat);
+  arch.position.set(0, 0, z);
+  arch.rotation.z = Math.PI;
+  scene.add(arch);
+  const aLight = new THREE.PointLight(color, 0.5, 15);
+  aLight.position.set(0, 6.5, z);
+  scene.add(aLight);
+}
+makeArch(18, 0xe53935);
+makeArch(-45, 0x7c3aed);
+
+// Flying data streams (vertical lines)
+for (let i = 0; i < 20; i++) {
+  const h = 2 + Math.random()*15;
+  const stream = new THREE.Mesh(
+    new THREE.BoxGeometry(0.03, h, 0.03),
+    new THREE.MeshBasicMaterial({
+      color:[0x9b59b6,0x2979ff,0xe53935,0x00c853][Math.floor(Math.random()*4)],
+      transparent:true, opacity:0.3+Math.random()*0.4
+    })
+  );
+  stream.position.set(
+    (Math.random()-0.5)*20,
+    h/2 + Math.random()*5,
+    (Math.random()-0.5)*100
+  );
+  scene.add(stream);
+}
+
+// ═══════════════════════════════════════════════════════════
+// PLAYER CONTROLS
+// ═══════════════════════════════════════════════════════════
+const keys = {};
+let yaw = 0, pitch = 0;
+let isLocked = false;
+let nearbyShop = null;
+let panelOpen = false;
+
+document.getElementById('enter-btn').addEventListener('click', () => {
+  document.getElementById('intro').classList.add('fade');
+  setTimeout(() => {
+    document.getElementById('intro').style.display = 'none';
+    document.getElementById('hud').classList.add('show');
+    document.getElementById('controls-hint').classList.add('show');
+    document.getElementById('minimap').classList.add('show');
+    lockPointer();
+  }, 1000);
+});
+
+function lockPointer() {
+  canvas.requestPointerLock = canvas.requestPointerLock || canvas.mozRequestPointerLock;
+  canvas.requestPointerLock();
+}
+
+document.addEventListener('pointerlockchange', () => {
+  isLocked = document.pointerLockElement === canvas;
+  document.body.classList.toggle('locked', isLocked);
+});
+
+document.addEventListener('mousemove', e => {
+  if (!isLocked || panelOpen) return;
+  yaw   -= e.movementX * 0.002;
+  pitch -= e.movementY * 0.002;
+  pitch = Math.max(-Math.PI*0.35, Math.min(Math.PI*0.35, pitch));
+});
+
+document.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (e.code === 'KeyE' && nearbyShop && !panelOpen) openShop(nearbyShop.data);
+  if (e.code === 'Escape') { closePanel(); }
+});
+document.addEventListener('keyup', e => { keys[e.code] = false; });
+canvas.addEventListener('click', () => { if (!panelOpen) lockPointer(); });
+
+// Mobile controls
+const mKeys = { fwd:false, back:false, left:false, right:false };
+document.getElementById('m-fwd').addEventListener('touchstart',   e=>{e.preventDefault();mKeys.fwd=true;},{passive:false});
+document.getElementById('m-fwd').addEventListener('touchend',     ()=>mKeys.fwd=false);
+document.getElementById('m-back').addEventListener('touchstart',  e=>{e.preventDefault();mKeys.back=true;},{passive:false});
+document.getElementById('m-back').addEventListener('touchend',    ()=>mKeys.back=false);
+document.getElementById('m-left').addEventListener('touchstart',  e=>{e.preventDefault();mKeys.left=true;},{passive:false});
+document.getElementById('m-left').addEventListener('touchend',    ()=>mKeys.left=false);
+document.getElementById('m-right').addEventListener('touchstart', e=>{e.preventDefault();mKeys.right=true;},{passive:false});
+document.getElementById('m-right').addEventListener('touchend',   ()=>mKeys.right=false);
+document.getElementById('m-enter').addEventListener('touchstart', e=>{e.preventDefault();if(nearbyShop)openShop(nearbyShop.data);},{passive:false});
+
+// Touch look
+let lastTouch = null;
+canvas.addEventListener('touchstart', e => { lastTouch = e.touches[0]; });
+canvas.addEventListener('touchmove', e => {
+  if (panelOpen || e.touches.length !== 1) return;
+  const t = e.touches[0];
+  if (lastTouch) {
+    yaw   -= (t.clientX - lastTouch.clientX) * 0.004;
+    pitch -= (t.clientY - lastTouch.clientY) * 0.004;
+    pitch = Math.max(-Math.PI*0.35, Math.min(Math.PI*0.35, pitch));
+  }
+  lastTouch = t;
+});
+
+// ═══════════════════════════════════════════════════════════
+// MOVEMENT
+// ═══════════════════════════════════════════════════════════
+const SPEED = 0.08;
+const BOUNDS = { minX:-5, maxX:5, minZ:-55, maxZ:16 };
+const moveDir = new THREE.Vector3();
+const camDir = new THREE.Vector3();
+
+function updateMovement() {
+  if (panelOpen) return;
+  const fwd  = keys['KeyW']||keys['ArrowUp']||mKeys.fwd;
+  const back = keys['KeyS']||keys['ArrowDown']||mKeys.back;
+  const left = keys['KeyA']||keys['ArrowLeft']||mKeys.left;
+  const right= keys['KeyD']||keys['ArrowRight']||mKeys.right;
+
+  camera.getWorldDirection(camDir);
+  camDir.y = 0; camDir.normalize();
+  const sideDir = new THREE.Vector3(-camDir.z, 0, camDir.x);
+
+  moveDir.set(0,0,0);
+  if (fwd)   moveDir.add(camDir);
+  if (back)  moveDir.sub(camDir);
+  if (right) moveDir.add(sideDir);
+  if (left)  moveDir.sub(sideDir);
+
+  if (moveDir.lengthSq() > 0) {
+    moveDir.normalize().multiplyScalar(SPEED);
+    camera.position.add(moveDir);
+    // Clamp
+    camera.position.x = Math.max(BOUNDS.minX, Math.min(BOUNDS.maxX, camera.position.x));
+    camera.position.z = Math.max(BOUNDS.minZ, Math.min(BOUNDS.maxZ, camera.position.z));
+    camera.position.y = 1.7;
+    // Head bob
+    camera.position.y = 1.7 + Math.sin(Date.now()*0.008)*0.03;
+  }
+
+  camera.rotation.y = yaw;
+  camera.rotation.x = pitch;
+}
+
+// ═══════════════════════════════════════════════════════════
+// SHOP PROXIMITY
+// ═══════════════════════════════════════════════════════════
+function checkProximity() {
+  let closest = null, closestDist = Infinity;
+  shopObjects.forEach(s => {
+    const dx = camera.position.x - s.worldPos.x;
+    const dz = camera.position.z - s.worldPos.z;
+    const dist = Math.sqrt(dx*dx + dz*dz);
+    if (dist < closestDist) { closestDist = dist; closest = s; }
+  });
+
+  const proxLabel = document.getElementById('prox-label');
+  const proxText  = document.getElementById('prox-text');
+  const proxDot   = document.getElementById('prox-dot');
+
+  if (closestDist < 9) {
+    nearbyShop = closest;
+    proxText.textContent = closest.data.name;
+    proxDot.style.background = closest.data.colorHex;
+    proxDot.style.boxShadow = `0 0 8px ${closest.data.colorHex}`;
+    proxLabel.classList.add('show');
+    document.getElementById('hud-hint').textContent = 'Press E or tap ⬛ to enter the shop';
+  } else {
+    nearbyShop = null;
+    proxLabel.classList.remove('show');
+    document.getElementById('hud-hint').textContent = 'Walk towards the glowing shops';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// SHOP PANEL
+// ═══════════════════════════════════════════════════════════
+function openShop(data) {
+  panelOpen = true;
+  if (document.pointerLockElement) document.exitPointerLock();
+
+  const waLink = `https://api.whatsapp.com/send?phone=97455026927&text=${encodeURIComponent(data.whatsapp)}`;
+  document.getElementById('panel-content').innerHTML = `
+    <span class="panel-type" style="color:${data.colorHex};">${data.type}</span>
+    <div class="panel-name">${data.name}</div>
+    <div class="panel-tagline">${data.tagline}</div>
+    ${data.price ? `
+      <div class="panel-price" style="color:${data.colorHex};">
+        <small>${data.currency}</small>${data.price}
+      </div>
+    ` : `<div style="font-size:14px;color:rgba(255,255,255,0.3);margin-bottom:20px;">Select add-ons to build your quote</div>`}
+    <div class="panel-divider"></div>
+    <span class="panel-section-label">What's included</span>
+    <ul class="panel-features">
+      ${data.features.map(f=>`
+        <li>
+          <span class="feat-check" style="background:${data.colorHex}22;">
+            <svg viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 3" stroke="${data.colorHex}" stroke-width="1.5" stroke-linecap="round"/></svg>
+          </span>
+          ${f}
+        </li>
+      `).join('')}
+    </ul>
+    <a href="${waLink}" target="_blank" class="panel-cta"
+       style="background:${data.colorHex};box-shadow:0 8px 30px ${data.glowHex};">
+      ${data.price ? `Get ${data.name} — QAR ${data.price}` : 'Get a Custom Quote'} →
+    </a>
+    <div class="panel-divider"></div>
+    <span class="panel-section-label">Perfect for</span>
+    <div class="panel-chips">
+      ${data.bizTypes.map(b=>`<span class="panel-chip">${b}</span>`).join('')}
+    </div>
+    <div style="height:40px;"></div>
+  `;
+  document.getElementById('shop-panel').classList.add('open');
+}
+
+function closePanel() {
+  panelOpen = false;
+  document.getElementById('shop-panel').classList.remove('open');
+  setTimeout(() => { if (!panelOpen) lockPointer(); }, 300);
+}
+
+// ═══════════════════════════════════════════════════════════
+// MINIMAP
+// ═══════════════════════════════════════════════════════════
+const mmCanvas = document.getElementById('mm-canvas');
+mmCanvas.width = 124; mmCanvas.height = 84;
+const mmCtx = mmCanvas.getContext('2d');
+
+function drawMinimap() {
+  mmCtx.fillStyle = '#0a0015';
+  mmCtx.fillRect(0,0,124,84);
+
+  // Road
+  mmCtx.fillStyle = 'rgba(100,0,150,0.2)';
+  mmCtx.fillRect(42,0,40,84);
+
+  // Shops
+  SHOP_DATA.forEach((data,i) => {
+    const z = SHOP_Z_POSITIONS[i];
+    const mx = 20;
+    const mz = ((z + 55) / 110) * 84;
+    mmCtx.fillStyle = data.colorHex;
+    mmCtx.shadowColor = data.colorHex;
+    mmCtx.shadowBlur = 4;
+    mmCtx.fillRect(mx-4, mz-3, 8, 6);
+    mmCtx.shadowBlur = 0;
+  });
+
+  // Player
+  const px = ((camera.position.x + 6) / 12) * 40 + 42;
+  const pz = ((camera.position.z + 55) / 110) * 84;
+  mmCtx.fillStyle = '#fff';
+  mmCtx.shadowColor = '#fff';
+  mmCtx.shadowBlur = 6;
+  mmCtx.beginPath();
+  mmCtx.arc(Math.max(4,Math.min(120,px)), Math.max(4,Math.min(80,pz)), 3, 0, Math.PI*2);
+  mmCtx.fill();
+  mmCtx.shadowBlur = 0;
+
+  // Direction indicator
+  const dx = Math.sin(yaw)*10;
+  const dz = Math.cos(yaw)*10;
+  mmCtx.strokeStyle = 'rgba(255,255,255,0.5)';
+  mmCtx.lineWidth = 1;
+  mmCtx.beginPath();
+  mmCtx.moveTo(Math.max(4,Math.min(120,px)), Math.max(4,Math.min(80,pz)));
+  mmCtx.lineTo(Math.max(4,Math.min(120,px+dx)), Math.max(4,Math.min(80,pz-dz)));
+  mmCtx.stroke();
+}
+
+// ═══════════════════════════════════════════════════════════
+// ANIMATE SHOPS
+// ═══════════════════════════════════════════════════════════
+function animateShops(t) {
+  shopObjects.forEach((s, idx) => {
+    const pulse = 1.5 + Math.sin(t*1.5 + idx*1.2)*0.8;
+    s.light.intensity = pulse;
+    s.light2.intensity = pulse * 0.4;
+
+    // Animate particles
+    const pos = s.particleGeo.attributes.position.array;
+    for (let i=0; i<30; i++) {
+      pos[i*3+1] = ((s.pPos[i*3+1] + (t*0.3 + i*0.15)) % 10);
+    }
+    s.particleGeo.attributes.position.needsUpdate = true;
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+// RENDER LOOP
+// ═══════════════════════════════════════════════════════════
+const clock = new THREE.Clock();
+function animate() {
+  requestAnimationFrame(animate);
+  const t = clock.getElapsedTime();
+
+  updateMovement();
+  checkProximity();
+  animateShops(t);
+  drawMinimap();
+
+  renderer.render(scene, camera);
+}
+animate();
+
+// ═══════════════════════════════════════════════════════════
+// RESIZE
+// ═══════════════════════════════════════════════════════════
+window.addEventListener('resize', () => {
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+});
+</script>
+</body>
+</html>
